@@ -5,6 +5,9 @@ import {
   ImperativeControlPluginRef,
 } from "@fluentui-copilot/react-copilot";
 import { ChatInputProps } from "./types";
+import { Button } from "@fluentui/react-components";
+import { MicFilled, MicOffFilled } from "@fluentui/react-icons";
+import { getSpeechSupport, startTranscription } from "../../../services/speechService";
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSubmit,
@@ -13,6 +16,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [inputText, setInputText] = useState<string>("");
   const controlRef = useRef<ImperativeControlPluginRef>(null);
+  const [listening, setListening] = useState<boolean>(false);
+  const stopRef = useRef<() => void>();
 
   useEffect(() => {
     if (currentUserMessage !== undefined) {
@@ -25,6 +30,36 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       setInputText("");
       controlRef.current?.setInputText("");
     }
+  };
+
+  const toggleMic = () => {
+    if (listening) {
+      stopRef.current?.();
+      setListening(false);
+      return;
+    }
+    const support = getSpeechSupport();
+    if (!support.hasSTT) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+    setListening(true);
+    stopRef.current = startTranscription(
+      (text, isFinal) => {
+        controlRef.current?.setInputText(text);
+        setInputText(text);
+        if (isFinal) {
+          stopRef.current?.();
+          setListening(false);
+          onMessageSend(text);
+        }
+      },
+      (err) => {
+        console.error("STT error", err);
+        setListening(false);
+      },
+      { interimResults: true }
+    );
   };
 
   return (
@@ -47,6 +82,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       placeholderValue="Type your message here..."
     >
       <ImperativeControlPlugin ref={controlRef} />
+      <Button
+        aria-label={listening ? "Stop recording" : "Start recording"}
+        appearance="subtle"
+        onClick={toggleMic}
+      >
+        {listening ? <MicOffFilled /> : <MicFilled />}
+      </Button>
     </ChatInputFluent>
   );
 };

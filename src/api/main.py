@@ -21,36 +21,61 @@ logger = None
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):
     agent = None
+    ai_project = None
 
     proj_endpoint = os.environ.get("AZURE_EXISTING_AIPROJECT_ENDPOINT")
     agent_id = os.environ.get("AZURE_EXISTING_AGENT_ID")
     try:
+        # Prefer service principal only if all three env vars are present and look valid; otherwise rely on CLI/VS Code
+        sp_client_id = os.environ.get("AZURE_CLIENT_ID", "").strip()
+        sp_tenant_id = os.environ.get("AZURE_TENANT_ID", "").strip()
+        sp_client_secret = os.environ.get("AZURE_CLIENT_SECRET", "").strip()
+        sp_enabled = bool(sp_client_id and sp_tenant_id and sp_client_secret)
+
+        credential = DefaultAzureCredential(
+            exclude_environment_credential=not sp_enabled,
+            exclude_shared_token_cache_credential=True,
+        )
+
         ai_project = AIProjectClient(
-            credential=DefaultAzureCredential(exclude_shared_token_cache_credential=True),
+            credential=credential,
             endpoint=proj_endpoint,
             api_version = "2025-05-15-preview" # Evaluations yet not supported on stable (api_version="2025-05-01")
         )
         logger.info("Created AIProjectClient")
 
         if enable_trace:
-            application_insights_connection_string = ""
+            # Prefer explicit env connection string if provided
+            application_insights_connection_string = os.getenv(
+                "APPLICATION_INSIGHTS_CONNECTION_STRING", ""
+            )
             try:
-                application_insights_connection_string = await ai_project.telemetry.get_connection_string()
+                # Fallback to AI Foundry project telemetry if available
+                if not application_insights_connection_string and hasattr(ai_project, "telemetry"):
+                    get_cs = getattr(ai_project.telemetry, "get_connection_string", None)
+                    if callable(get_cs):
+                        application_insights_connection_string = await get_cs()
             except Exception as e:
-                e_string = str(e)
-                logger.error("Failed to get Application Insights connection string, error: %s", e_string)
+                logger.error(
+                    "Failed to get Application Insights connection string, error: %s",
+                    str(e),
+                )
             if not application_insights_connection_string:
-                logger.error("Application Insights was not enabled for this project.")
-                logger.error("Enable it via the 'Tracing' tab in your AI Foundry project page.")
-                exit()
+                logger.warning(
+                    "Tracing requested but no connection string found. Continuing without tracing."
+                )
             else:
                 from azure.monitor.opentelemetry import configure_azure_monitor
-                configure_azure_monitor(connection_string=application_insights_connection_string)
-                app.state.application_insights_connection_string = application_insights_connection_string
+                configure_azure_monitor(
+                    connection_string=application_insights_connection_string
+                )
+                app.state.application_insights_connection_string = (
+                    application_insights_connection_string
+                )
                 logger.info("Configured Application Insights for tracing.")
 
         if agent_id:
-            try: 
+            try:
                 agent = await ai_project.agents.get_agent(agent_id)
                 logger.info("Agent already exists, skipping creation")
                 logger.info(f"Fetched agent, agent ID: {agent.id}")
@@ -83,9 +108,10 @@ async def lifespan(app: fastapi.FastAPI):
 
     finally:
         try:
-            await ai_project.close()
-            logger.info("Closed AIProjectClient")
-        except Exception as e:
+            if ai_project is not None:
+                await ai_project.close()
+                logger.info("Closed AIProjectClient")
+        except Exception:
             logger.error("Error closing AIProjectClient", exc_info=True)
 
 
@@ -106,11 +132,10 @@ def create_app():
     if enable_trace:
         logger.info("Tracing is enabled.")
         try:
-            from azure.monitor.opentelemetry import configure_azure_monitor
+            from azure.monitor.opentelemetry import configure_azure_monitor  # noqa: F401
         except ModuleNotFoundError:
-            logger.error("Required libraries for tracing not installed.")
-            logger.error("Please make sure azure-monitor-opentelemetry is installed.")
-            exit()
+            logger.warning("Tracing library not installed; continuing without tracing.")
+            enable_trace = False
     else:
         logger.info("Tracing is not enabled")
 

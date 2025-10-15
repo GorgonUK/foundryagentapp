@@ -11,6 +11,7 @@ param environmentName string
 // If using different models, update the SKU,capacity depending on the model you use.
 // https://learn.microsoft.com/azure/ai-services/agents/concepts/model-region-support
 @allowed([
+  'uksouth'
   'eastus'
   'eastus2'
   'swedencentral'
@@ -115,6 +116,15 @@ param enableAzureMonitorTracing bool = false
 param azureTracingGenAIContentRecordingEnabled bool = false
 
 param templateValidationMode bool = false
+
+@description('Azure Speech key for TTS')
+param speechKey string = ''
+
+@description('Azure Speech region, e.g., uksouth')
+param speechRegion string = ''
+
+@description('Application Insights connection string for tracing')
+param applicationInsightsConnectionString string = ''
 
 @description('Random seed to be used during generation of new resources suffixes.')
 param seed string = newGuid()
@@ -296,6 +306,9 @@ module api 'api.bicep' = {
     enableAzureMonitorTracing: enableAzureMonitorTracing
     azureTracingGenAIContentRecordingEnabled: azureTracingGenAIContentRecordingEnabled
     projectEndpoint: projectEndpoint
+    speechKey: speechKey
+    speechRegion: speechRegion
+    applicationInsightsConnectionString: applicationInsightsConnectionString
   }
 }
 

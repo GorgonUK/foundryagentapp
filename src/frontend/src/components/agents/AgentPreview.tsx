@@ -15,9 +15,9 @@ import { AgentPreviewChatBot } from "./AgentPreviewChatBot";
 import { MenuButton } from "../core/MenuButton/MenuButton";
 import { IChatItem } from "./chatbot/types";
 import { Waves } from "./Waves";
-import { BuiltWithBadge } from "./BuiltWithBadge";
 
 import styles from "./AgentPreview.module.css";
+import { speakAzureText } from "../../services/speechService";
 
 interface IAgent {
   id: string;
@@ -76,11 +76,28 @@ const preprocessContent = (
   return content;
 };
 
+// Extract two-stream response from plain text format:
+// "voice_summary: ...\n\ntext_detail: ..."
+const parseTwoStream = (
+  raw: string
+): { summary?: string; detail?: string } | null => {
+  if (!raw) return null;
+  const re = /voice_summary\s*:\s*([\s\S]*?)\s*text_detail\s*:\s*([\s\S]*)$/i;
+  const m = re.exec(raw);
+  if (m && m.length >= 3) {
+    const summary = m[1]?.trim();
+    const detail = m[2]?.trim();
+    return { summary, detail };
+  }
+  return null;
+};
+
 export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [messageList, setMessageList] = useState<IChatItem[]>([]);
   const [isResponding, setIsResponding] = useState(false);
   const [isLoadingChatHistory, setIsLoadingChatHistory] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
 
   const loadChatHistory = async () => {
     try {
@@ -113,9 +130,27 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
               more: { time: entry.created_at }, // Or use timestamp from history if available
             });
           } else {
+            let displayContent = preprocessContent(entry.content, entry.annotations);
+            // Attempt to decode structured response { voice_summary, text_detail }
+            try {
+              const parsed = JSON.parse(entry.content as unknown as string);
+              if (parsed && typeof parsed === "object") {
+                const detail = (parsed as any).text_detail as string | undefined;
+                if (detail) {
+                  displayContent = preprocessContent(detail, entry.annotations);
+                }
+                // We do not auto-speak history; only live responses should speak
+              }
+            } catch {
+              // Not JSON; try two-stream plaintext pattern
+              const two = parseTwoStream(entry.content);
+              if (two?.detail) {
+                displayContent = preprocessContent(two.detail, entry.annotations);
+              }
+            }
             historyMessages.push({
               id: `assistant-hist-${Date.now()}-${Math.random()}`, // Ensure unique ID
-              content: preprocessContent(entry.content, entry.annotations),
+              content: displayContent,
               role: "assistant", // Assuming 'assistant' role for non-user
               isAnswer: true, // Assuming this property for assistant messages
               more: { time: entry.created_at }, // Or use timestamp from history if available
@@ -123,7 +158,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
             });
           }
         }
-        setMessageList((prev) => [...historyMessages, ...prev]); // Prepend history
+        setMessageList((prev: IChatItem[]) => [...historyMessages, ...prev]); // Prepend history
       } else {
         const errorChatItem = createAssistantMessageDiv(); // This will add an empty message first
         appendAssistantMessage(
@@ -176,7 +211,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
       more: { time: new Date().toISOString() },
     };
 
-    setMessageList((prev) => [...prev, userMessage]);
+    setMessageList((prev: IChatItem[]) => [...prev, userMessage]);
 
     try {
       const postData = { message: message };
@@ -322,6 +357,37 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
                   accumulatedContent
                 );
 
+                // If the final content is structured JSON with voice_summary/text_detail,
+                // speak the summary and display only the detail.
+                try {
+                  const parsed = JSON.parse(accumulatedContent);
+                  if (parsed && typeof parsed === "object") {
+                    const summary = (parsed as any).voice_summary as string | undefined;
+                    const detail = (parsed as any).text_detail as string | undefined;
+                    if (summary) {
+                      // Only speak if voice is enabled
+                      if (voiceEnabled) {
+                        // Prefer Azure Speech, fallback handled inside
+                        await speakAzureText(summary, "en-GB-AdaMultilingualNeural");
+                      }
+                    }
+                    if (detail) {
+                      accumulatedContent = detail;
+                    }
+                  }
+                } catch {
+                  // Non-JSON; try parsing two-stream plaintext
+                  const two = parseTwoStream(accumulatedContent);
+                  if (two) {
+                    if (two.summary && voiceEnabled) {
+                      await speakAzureText(two.summary, "en-GB-AdaMultilingualNeural");
+                    }
+                    if (two.detail) {
+                      accumulatedContent = two.detail;
+                    }
+                  }
+                }
+
                 setIsResponding(false);
               } else {
                 accumulatedContent += data.content;
@@ -332,9 +398,24 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
               }
 
               // Update the UI with the accumulated content
+              // Hide voice_summary during streaming; only show text after 'text_detail:' marker
+              let displayWhileStreaming = accumulatedContent;
+              const lower = displayWhileStreaming.toLowerCase();
+              const textDetailIdx = lower.indexOf("text_detail:");
+              const voiceIdx = lower.indexOf("voice_summary:");
+              if (isStreaming && voiceIdx !== -1) {
+                if (textDetailIdx !== -1 && textDetailIdx + "text_detail:".length <= displayWhileStreaming.length) {
+                  displayWhileStreaming = displayWhileStreaming
+                    .substring(textDetailIdx + "text_detail:".length)
+                    .trimStart();
+                } else {
+                  displayWhileStreaming = ""; // suppress until detail appears
+                }
+              }
+
               appendAssistantMessage(
                 chatItem,
-                accumulatedContent,
+                displayWhileStreaming,
                 isStreaming,
                 annotations
               );
@@ -359,7 +440,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
       isAnswer: true,
       more: { time: new Date().toISOString() },
     };
-    setMessageList((prev) => [...prev, item]);
+    setMessageList((prev: IChatItem[]) => [...prev, item]);
     return item;
   };
   const appendAssistantMessage = (
@@ -382,7 +463,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
 
       // Set the innerHTML of the message text div to the HTML content
       chatItem.content = htmlContent;
-      setMessageList((prev) => {
+      setMessageList((prev: IChatItem[]) => {
         return [...prev.slice(0, -1), { ...chatItem }];
       });
 
@@ -498,6 +579,12 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
         <div className={styles.rightSection}>
           <Button
             appearance="subtle"
+            onClick={() => setVoiceEnabled((v) => !v)}
+          >
+            {voiceEnabled ? "Voice: On" : "Voice: Off"}
+          </Button>
+          <Button
+            appearance="subtle"
             icon={<ChatRegular aria-hidden={true} />}
             onClick={newThread}
           >
@@ -543,7 +630,6 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
           )}
         </div>
 
-        <BuiltWithBadge className={styles.builtWithBadge} />
       </div>
 
       {/* Settings Panel */}

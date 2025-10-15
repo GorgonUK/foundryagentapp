@@ -124,6 +124,12 @@ async def get_available_tool(
     :param creds: The credentials, used for the index.
     :return: The tool set, available based on the environment.
     """
+    # Optional switch to disable all external search tools (AI Search and File Search)
+    disable_search = os.environ.get('AGENT_DISABLE_SEARCH', '').strip().lower() == 'true'
+    if disable_search:
+        logger.info("agent: AGENT_DISABLE_SEARCH=true, no search tools will be configured")
+        return None
+
     # File name -> {"id": file_id, "path": file_path}
     file_ids: List[str] = []
     # First try to get an index search.
@@ -168,23 +174,44 @@ async def create_agent(ai_client: AIProjectClient,
                        creds: AsyncTokenCredential) -> Agent:
     logger.info("Creating new agent with resources")
     tool = await get_available_tool(ai_client, creds)
-    toolset = AsyncToolSet()
-    toolset.add(tool)
-    
-    instructions = "Use AI Search always. Avoid to use base knowledge." if isinstance(tool, AzureAISearchTool) else "Use File Search always.  Avoid to use base knowledge."
-    
-    agent = await ai_client.agents.create_agent(
-        model=os.environ["AZURE_AI_AGENT_DEPLOYMENT_NAME"],
-        name=os.environ["AZURE_AI_AGENT_NAME"],
-        instructions=instructions,
-        toolset=toolset
-    )
+    toolset = None
+    instructions = "Use only your base knowledge. Do not call any external search tools."
+    if tool is not None:
+        ts = AsyncToolSet()
+        ts.add(tool)
+        toolset = ts
+        instructions = (
+            "Use AI Search always. Avoid to use base knowledge."
+            if isinstance(tool, AzureAISearchTool)
+            else "Use File Search always. Avoid to use base knowledge."
+        )
+
+    if toolset is not None:
+        agent = await ai_client.agents.create_agent(
+            model=os.environ["AZURE_AI_AGENT_DEPLOYMENT_NAME"],
+            name=os.environ["AZURE_AI_AGENT_NAME"],
+            instructions=instructions,
+            toolset=toolset
+        )
+    else:
+        agent = await ai_client.agents.create_agent(
+            model=os.environ["AZURE_AI_AGENT_DEPLOYMENT_NAME"],
+            name=os.environ["AZURE_AI_AGENT_NAME"],
+            instructions=instructions
+        )
     return agent
 
 
 async def initialize_resources():
     try:
+        # Prefer service principal only if all 3 env vars exist; otherwise use CLI/VS Code
+        sp_client_id = os.environ.get("AZURE_CLIENT_ID", "").strip()
+        sp_tenant_id = os.environ.get("AZURE_TENANT_ID", "").strip()
+        sp_client_secret = os.environ.get("AZURE_CLIENT_SECRET", "").strip()
+        sp_enabled = bool(sp_client_id and sp_tenant_id and sp_client_secret)
+
         async with DefaultAzureCredential(
+                exclude_environment_credential=not sp_enabled,
                 exclude_shared_token_cache_credential=True) as creds:
             async with AIProjectClient(
                 credential=creds,

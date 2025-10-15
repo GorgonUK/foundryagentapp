@@ -20,6 +20,7 @@
     "location": {
       "type": "string",
       "allowedValues": [
+        "uksouth",
         "eastus",
         "eastus2",
         "swedencentral",

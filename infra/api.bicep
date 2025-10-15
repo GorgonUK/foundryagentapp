@@ -17,6 +17,9 @@ param agentID string
 param enableAzureMonitorTracing bool
 param azureTracingGenAIContentRecordingEnabled bool
 param projectEndpoint string
+param speechKey string = ''
+param speechRegion string = ''
+param applicationInsightsConnectionString string = ''
 
 resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: identityName
@@ -79,6 +82,18 @@ var env = [
   {
     name: 'AZURE_EXISTING_AIPROJECT_ENDPOINT'
     value: projectEndpoint
+  }
+  {
+    name: 'AZURE_SPEECH_KEY'
+    value: speechKey
+  }
+  {
+    name: 'AZURE_SPEECH_REGION'
+    value: speechRegion
+  }
+  {
+    name: 'APPLICATION_INSIGHTS_CONNECTION_STRING'
+    value: applicationInsightsConnectionString
   }
 ]
 

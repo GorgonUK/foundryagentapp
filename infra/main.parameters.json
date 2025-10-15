@@ -116,5 +116,16 @@
     "templateValidationMode": {
       "value": "${TEMPLATE_VALIDATION_MODE=false}"
     }
+    ,
+    "speechKey": {
+      "value": "${AZURE_SPEECH_KEY}"
+    },
+    "speechRegion": {
+      "value": "${AZURE_SPEECH_REGION}"
+    }
+    ,
+    "applicationInsightsConnectionString": {
+      "value": "${APPLICATION_INSIGHTS_CONNECTION_STRING}"
+    }
   }
 }

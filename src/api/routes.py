@@ -40,6 +40,7 @@ logger = logging.getLogger("azureaiapp")
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 from opentelemetry import trace
+from typing import Set
 tracer = trace.get_tracer(__name__)
 
 # Define the directory for your templates.
@@ -53,6 +54,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
 import secrets
+import aiohttp
 
 security = HTTPBasic()
 
@@ -97,6 +99,29 @@ def get_app_insights_conn_str(request: Request) -> str:
 def serialize_sse_event(data: Dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
+@router.get("/speech/token")
+async def get_speech_token(_ = auth_dependency):
+    """Return short-lived Azure Speech token and region. Never expose the key to the client."""
+    region = os.environ.get("AZURE_SPEECH_REGION", "").strip()
+    key = os.environ.get("AZURE_SPEECH_KEY", "").strip()
+    if not region or not key:
+        raise HTTPException(status_code=400, detail="Speech region/key not configured")
+    token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+    headers = {"Ocp-Apim-Subscription-Key": key}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(token_url, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise HTTPException(status_code=500, detail=f"Failed to get token: {resp.status} {text}")
+                token = await resp.text()
+                return JSONResponse({"token": token, "region": region})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching speech token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get speech token")
+
 async def get_message_and_annotations(agent_client : AgentsClient, message: ThreadMessage) -> Dict:
     annotations = []
     # Get file annotations for the file search.
@@ -126,6 +151,11 @@ class MyEventHandler(AsyncAgentEventHandler[str]):
         self.agent_client = ai_project.agents
         self.ai_project = ai_project
         self.app_insights_conn_str = app_insights_conn_str
+        # Toggle automated evaluation via env to avoid rate limiting
+        self.eval_enabled = str(os.getenv("ENABLE_AGENT_EVALUATION", "")).lower() == "true"
+        # Track processed runs to avoid duplicate evaluations on repeated events
+        if not hasattr(MyEventHandler, "_evaluated_run_ids"):
+            MyEventHandler._evaluated_run_ids = set()  # type: ignore[attr-defined]
 
     async def on_message_delta(self, delta: MessageDeltaChunk) -> Optional[str]:
         stream_data = {'content': delta.text, 'type': "message"}
@@ -152,9 +182,12 @@ class MyEventHandler(AsyncAgentEventHandler[str]):
         stream_data = {'content': run_information, 'type': 'thread_run'}
         if run.status == "failed":
             stream_data['error'] = run.last_error.as_dict()
-        # automatically run agent evaluation when the run is completed
-        if run.status == "completed":
-            run_agent_evaluation(run.thread_id, run.id, self.ai_project, self.app_insights_conn_str)
+        # Optionally run agent evaluation when the run is completed, with dedupe
+        if run.status == "completed" and self.eval_enabled:
+            evaluated: Set[str] = getattr(MyEventHandler, "_evaluated_run_ids")  # type: ignore[attr-defined]
+            if run.id not in evaluated:
+                evaluated.add(run.id)
+                run_agent_evaluation(run.thread_id, run.id, self.ai_project, self.app_insights_conn_str)
         return serialize_sse_event(stream_data)
 
     async def on_error(self, data: str) -> Optional[str]:
