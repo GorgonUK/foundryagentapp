@@ -11,7 +11,6 @@ from fastapi import Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse
-from fastapi import WebSocket, WebSocketDisconnect
 
 import logging
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -41,7 +40,6 @@ logger = logging.getLogger("azureaiapp")
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 from opentelemetry import trace
-from typing import Set
 tracer = trace.get_tracer(__name__)
 
 # Define the directory for your templates.
@@ -55,31 +53,6 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
 import secrets
-import aiohttp
-import contextlib
-import base64
-import threading
-import json as py_json
-from azure.core.credentials import AzureKeyCredential
-from azure.identity import DefaultAzureCredential
-from azure.ai.voicelive.aio import connect as voicelive_connect
-from azure.ai.voicelive.models import (
-   RequestSession,
-   ServerVad,
-   AzureStandardVoice,
-   Modality,
-   ServerEventType,
-)
-try:
-    # Newer SDK variants
-    from azure.ai.voicelive.models import InputAudioFormat as _InputAudioFormat, OutputAudioFormat as _OutputAudioFormat  # type: ignore
-    VOICELIVE_INPUT_FMT = _InputAudioFormat.PCM16  # type: ignore[attr-defined]
-    VOICELIVE_OUTPUT_FMT = _OutputAudioFormat.PCM16  # type: ignore[attr-defined]
-except Exception:
-    # Older SDK variants
-    from azure.ai.voicelive.models import AudioFormat as _AudioFormat  # type: ignore
-    VOICELIVE_INPUT_FMT = _AudioFormat.PCM16  # type: ignore[attr-defined]
-    VOICELIVE_OUTPUT_FMT = _AudioFormat.PCM16  # type: ignore[attr-defined]
 
 security = HTTPBasic()
 
