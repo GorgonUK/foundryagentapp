@@ -20,6 +20,11 @@ param projectEndpoint string
 param speechKey string = ''
 param speechRegion string = ''
 param applicationInsightsConnectionString string = ''
+// Voice Live parameters
+param voiceLiveApiKey string = ''
+param voiceLiveModel string = ''
+param voiceLiveEndpoint string = ''
+param voiceLiveVoice string = ''
 
 resource apiIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: identityName
@@ -94,6 +99,23 @@ var env = [
   {
     name: 'APPLICATION_INSIGHTS_CONNECTION_STRING'
     value: applicationInsightsConnectionString
+  }
+  // Voice Live environment
+  {
+    name: 'AZURE_VOICELIVE_API_KEY'
+    value: voiceLiveApiKey
+  }
+  {
+    name: 'AZURE_VOICELIVE_MODEL'
+    value: voiceLiveModel
+  }
+  {
+    name: 'AZURE_VOICELIVE_ENDPOINT'
+    value: voiceLiveEndpoint
+  }
+  {
+    name: 'VOICELIVE_VOICE'
+    value: voiceLiveVoice
   }
 ]
 

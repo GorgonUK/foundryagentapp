@@ -5,9 +5,10 @@ import {
   ImperativeControlPluginRef,
 } from "@fluentui-copilot/react-copilot";
 import { ChatInputProps } from "./types";
-import { Button } from "@fluentui/react-components";
 import { MicFilled, MicOffFilled } from "@fluentui/react-icons";
-import { getSpeechSupport, startTranscription } from "../../../services/speechService";
+import clsx from "clsx";
+import { startLiveVoice } from "../../../services/speechService";
+import styles from "./ChatInput.module.css";
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSubmit,
@@ -18,6 +19,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const controlRef = useRef<ImperativeControlPluginRef>(null);
   const [listening, setListening] = useState<boolean>(false);
   const stopRef = useRef<() => void>();
+  const voiceStopRef = useRef<() => void>();
 
   useEffect(() => {
     if (currentUserMessage !== undefined) {
@@ -34,32 +36,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   const toggleMic = () => {
     if (listening) {
-      stopRef.current?.();
+      try { stopRef.current?.(); } catch {}
+      try { voiceStopRef.current?.(); } catch {}
       setListening(false);
       return;
     }
-    const support = getSpeechSupport();
-    if (!support.hasSTT) {
-      alert("Speech recognition is not supported in this browser.");
-      return;
-    }
     setListening(true);
-    stopRef.current = startTranscription(
-      (text, isFinal) => {
-        controlRef.current?.setInputText(text);
-        setInputText(text);
-        if (isFinal) {
-          stopRef.current?.();
-          setListening(false);
-          onMessageSend(text);
-        }
+    // Voice live API: stream mic to backend and handle partial/final results
+    startLiveVoice(
+      () => {
+        // Optional: display partials
       },
-      (err) => {
-        console.error("STT error", err);
-        setListening(false);
-      },
-      { interimResults: true }
-    );
+      (finalText) => {
+        if (!finalText) return;
+        onMessageSend(finalText.trim());
+      }
+    ).then((stop) => {
+      voiceStopRef.current = stop;
+    }).catch((e) => {
+      console.error("live voice failed", e);
+      setListening(false);
+    });
   };
 
   return (
@@ -70,6 +67,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       disableSend={isGenerating}
       history={true}
       isSending={isGenerating}
+      actions={
+        <span>
+          <div className={styles.micControl}>
+            <div
+              role="button"
+              aria-pressed={listening}
+              aria-label={listening ? "Stop recording" : "Start recording"}
+              title={listening ? "Stop recording" : "Start recording"}
+              className={clsx(styles.micButton, listening && styles.micListening)}
+              tabIndex={0}
+              onClick={toggleMic}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleMic();
+                }
+              }}
+            >
+              {listening 
+  ? <MicOffFilled width="20" height="20" /> 
+  : <MicFilled width="20" height="20" />
+}
+            </div>
+          </div>
+        </span>
+      }
       onChange={(
         _: React.ChangeEvent<HTMLInputElement>,
         d: { value: string }
@@ -82,13 +105,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       placeholderValue="Type your message here..."
     >
       <ImperativeControlPlugin ref={controlRef} />
-      <Button
-        aria-label={listening ? "Stop recording" : "Start recording"}
-        appearance="subtle"
-        onClick={toggleMic}
-      >
-        {listening ? <MicOffFilled /> : <MicFilled />}
-      </Button>
     </ChatInputFluent>
   );
 };

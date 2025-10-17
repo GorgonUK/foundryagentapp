@@ -32,6 +32,11 @@ export default defineConfig({
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
       },
+      "/voice": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   build: {

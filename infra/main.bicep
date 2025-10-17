@@ -126,6 +126,16 @@ param speechRegion string = ''
 @description('Application Insights connection string for tracing')
 param applicationInsightsConnectionString string = ''
 
+// Voice Live configuration
+@description('Azure Voice Live API key (optional if using Entra ID)')
+param voiceLiveApiKey string = ''
+@description('Azure Voice Live model (e.g., gpt-4o-realtime-preview)')
+param voiceLiveModel string = ''
+@description('Azure Voice Live endpoint (wss://...)')
+param voiceLiveEndpoint string = ''
+@description('Preferred Voice Live voice (e.g., en-US-Ava:DragonHDLatestNeural)')
+param voiceLiveVoice string = ''
+
 @description('Random seed to be used during generation of new resources suffixes.')
 param seed string = newGuid()
 
@@ -309,6 +319,11 @@ module api 'api.bicep' = {
     speechKey: speechKey
     speechRegion: speechRegion
     applicationInsightsConnectionString: applicationInsightsConnectionString
+    // Voice Live params
+    voiceLiveApiKey: voiceLiveApiKey
+    voiceLiveModel: voiceLiveModel
+    voiceLiveEndpoint: voiceLiveEndpoint
+    voiceLiveVoice: voiceLiveVoice
   }
 }
 

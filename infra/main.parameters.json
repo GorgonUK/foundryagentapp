@@ -127,5 +127,18 @@
     "applicationInsightsConnectionString": {
       "value": "${APPLICATION_INSIGHTS_CONNECTION_STRING}"
     }
+    ,
+    "voiceLiveApiKey": {
+      "value": "${AZURE_VOICELIVE_API_KEY}"
+    },
+    "voiceLiveModel": {
+      "value": "${AZURE_VOICELIVE_MODEL}"
+    },
+    "voiceLiveEndpoint": {
+      "value": "${AZURE_VOICELIVE_ENDPOINT}"
+    },
+    "voiceLiveVoice": {
+      "value": "${VOICELIVE_VOICE}" 
+    }
   }
 }
