@@ -2,15 +2,30 @@
 # Licensed under the MIT license. See LICENSE.md file in the project root for full license information.
 
 import asyncio
+import base64
 import json
 import os
+import contextlib
 from typing import AsyncGenerator, Optional, Dict
 
+import aiohttp
 import fastapi
-from fastapi import Request, Depends, HTTPException
+from fastapi import Request, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import JSONResponse
+from azure.identity import DefaultAzureCredential
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.voicelive.aio import connect
+from azure.ai.voicelive.models import (
+    RequestSession,
+    ServerVad,
+    AzureStandardVoice,
+    Modality,
+    ServerEventType
+)
+# import py_json  # Using standard json instead
+
 
 import logging
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -49,7 +64,7 @@ templates = Jinja2Templates(directory=directory)
 # Create a new FastAPI router
 router = fastapi.APIRouter()
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from typing import Optional
 import secrets
@@ -325,7 +340,7 @@ async def voice_live(ws: WebSocket):
     model = os.environ.get("AZURE_VOICELIVE_MODEL", "").strip()
     api_key = os.environ.get("AZURE_VOICELIVE_API_KEY", "").strip()
     if not endpoint or not model:
-        await ws.send_text(py_json.dumps({"type": "error", "message": "VoiceLive endpoint/model not configured"}))
+        await ws.send_text(json.dumps({"type": "error", "message": "VoiceLive endpoint/model not configured"}))
         await ws.close()
         return
 
@@ -333,7 +348,7 @@ async def voice_live(ws: WebSocket):
     credential = AzureKeyCredential(api_key) if api_key else DefaultAzureCredential()
 
     try:
-        async with voicelive_connect(
+        async with connect(
             endpoint=endpoint,
             credential=credential,
             model=model,
@@ -348,8 +363,9 @@ async def voice_live(ws: WebSocket):
                 modalities=[Modality.TEXT, Modality.AUDIO],
                 instructions=os.environ.get("AZURE_VOICELIVE_INSTRUCTIONS", "You are a helpful assistant."),
                 voice=AzureStandardVoice(name=os.environ.get("AZURE_VOICELIVE_VOICE", "en-US-Ava:DragonHDLatestNeural"), type="azure-standard"),
-                input_audio_format=VOICELIVE_INPUT_FMT,
-                output_audio_format=VOICELIVE_OUTPUT_FMT,
+                input_audio_format="pcm16",
+                output_audio_format="pcm16",
+                input_audio_sampling_rate=24000,
                 turn_detection=ServerVad(threshold=0.5, prefix_padding_ms=300, silence_duration_ms=500),
             )
             await conn.session.update(session=session)
@@ -361,30 +377,30 @@ async def voice_live(ws: WebSocket):
                     # Handle both enum and string event types
                     if et == getattr(ServerEventType, "RESPONSE_TRANSCRIPT_DELTA", object()) or et == "response.transcript.delta":
                         # partial transcript
-                        await ws.send_text(py_json.dumps({"type": "partial", "text": getattr(event, "delta", "")}))
+                        await ws.send_text(json.dumps({"type": "partial", "text": getattr(event, "delta", "")}))
                     elif et == getattr(ServerEventType, "RESPONSE_TRANSCRIPT_COMPLETED", object()) or et == "response.transcript.completed":
-                        await ws.send_text(py_json.dumps({"type": "final", "text": getattr(event, "transcript", "")}))
+                        await ws.send_text(json.dumps({"type": "final", "text": getattr(event, "transcript", "")}))
                     elif et == getattr(ServerEventType, "RESPONSE_CREATED", object()) or et == "response.created":
                         with contextlib.suppress(Exception):
-                            await ws.send_text(py_json.dumps({"type": "info", "message": "response.created"}))
+                            await ws.send_text(json.dumps({"type": "info", "message": "response.created"}))
                     elif et == getattr(ServerEventType, "RESPONSE_AUDIO_DELTA", object()) or et == "response.audio.delta":
                         # stream audio frames to client as base64 to avoid binary WS framing issues
                         try:
                             audio_bytes = getattr(event, "delta", b"")
                             if isinstance(audio_bytes, (bytes, bytearray)) and audio_bytes:
                                 audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-                                await ws.send_text(py_json.dumps({"type": "audio", "data": audio_b64}))
+                                await ws.send_text(json.dumps({"type": "audio", "data": audio_b64}))
                         except Exception:
                             pass
                     elif et == getattr(ServerEventType, "RESPONSE_AUDIO_DONE", object()) or et == "response.audio.done":
                         with contextlib.suppress(Exception):
-                            await ws.send_text(py_json.dumps({"type": "audio_done"}))
+                            await ws.send_text(json.dumps({"type": "audio_done"}))
                     elif et == getattr(ServerEventType, "RESPONSE_DONE", object()) or et == "response.done":
                         with contextlib.suppress(Exception):
-                            await ws.send_text(py_json.dumps({"type": "done"}))
+                            await ws.send_text(json.dumps({"type": "done"}))
                     elif et == getattr(ServerEventType, "ERROR", object()) or et == "error":
                         with contextlib.suppress(Exception):
-                            await ws.send_text(py_json.dumps({"type": "error", "message": getattr(event, "error", getattr(event, "message", ""))}))
+                            await ws.send_text(json.dumps({"type": "error", "message": getattr(event, "error", getattr(event, "message", ""))}))
 
             relay_task = asyncio.create_task(relay_events())
 
@@ -401,7 +417,7 @@ async def voice_live(ws: WebSocket):
                         await conn.input_audio_buffer.append(audio=b64)
                     elif "text" in message and message["text"] is not None:
                         try:
-                            payload = py_json.loads(message["text"]) if message["text"] else {}
+                            payload = json.loads(message["text"]) if message["text"] else {}
                         except Exception:
                             payload = {}
                         if payload.get("type") == "stop":
@@ -421,7 +437,7 @@ async def voice_live(ws: WebSocket):
     except Exception as e:
         logger.error(f"Error in /voice/live: {e}")
         with contextlib.suppress(Exception):
-            await ws.send_text(py_json.dumps({"type": "error", "message": "Server error"}))
+            await ws.send_text(json.dumps({"type": "error", "message": "Server error"}))
             await ws.close()
 
 @router.post("/chat")
