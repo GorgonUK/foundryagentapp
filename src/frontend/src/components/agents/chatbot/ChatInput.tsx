@@ -7,7 +7,7 @@ import {
 import { ChatInputProps } from "./types";
 import { MicFilled, MicOffFilled } from "@fluentui/react-icons";
 import clsx from "clsx";
-import { startLiveVoice } from "../../../services/speechService";
+import { startAzureSTT } from "../../../services/speechService";
 import styles from "./ChatInput.module.css";
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -18,7 +18,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [inputText, setInputText] = useState<string>("");
   const controlRef = useRef<ImperativeControlPluginRef>(null);
   const [listening, setListening] = useState<boolean>(false);
-  const stopRef = useRef<() => void>();
   const voiceStopRef = useRef<() => void>();
 
   useEffect(() => {
@@ -36,25 +35,38 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   const toggleMic = () => {
     if (listening) {
-      try { stopRef.current?.(); } catch {}
-      try { voiceStopRef.current?.(); } catch {}
-      setListening(false);
+      // Stop recording - this will trigger the final callback
+      try { 
+        voiceStopRef.current?.(); 
+      } catch (e) {
+        console.error("Error stopping STT", e);
+        setListening(false);
+      }
       return;
     }
     setListening(true);
-    // Voice live API: stream mic to backend and handle partial/final results
-    startLiveVoice(
-      () => {
-        // Optional: display partials
+    // Azure Speech-to-Text: use STT with fast transcription
+    startAzureSTT(
+      (partialText) => {
+        // Update textbox in real-time with partial results (fast transcription)
+        if (partialText) {
+          setInputText(partialText);
+          controlRef.current?.setInputText(partialText);
+        }
       },
       (finalText) => {
-        if (!finalText) return;
-        onMessageSend(finalText.trim());
+        // When recording stops, submit the final text
+        setListening(false);
+        if (finalText && finalText.trim()) {
+          setInputText(finalText);
+          controlRef.current?.setInputText(finalText);
+          onMessageSend(finalText.trim());
+        }
       }
     ).then((stop) => {
       voiceStopRef.current = stop;
     }).catch((e) => {
-      console.error("live voice failed", e);
+      console.error("Azure STT failed", e);
       setListening(false);
     });
   };

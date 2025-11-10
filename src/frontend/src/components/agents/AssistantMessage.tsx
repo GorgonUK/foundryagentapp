@@ -52,7 +52,7 @@ export function AssistantMessage({
       }
       avatar={<AgentIcon alt="" iconName={agentLogo} />}
       className={styles.copilotChatMessage}
-      disclaimer={<span>AI-generated content may be incorrect</span>}
+      disclaimer={<span></span>}
       footnote={
         <>
           {hasAnnotations && (

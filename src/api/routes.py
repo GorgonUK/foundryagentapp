@@ -329,7 +329,10 @@ async def get_chat_agent(
 
 @router.websocket("/voice/live")
 async def voice_live(ws: WebSocket):
-    """Bi-directional live voice session using Azure Voice Live.
+    """DEPRECATED: Bi-directional live voice session using Azure Voice Live.
+    This endpoint is no longer used. The frontend now uses Azure Speech-to-Text (STT)
+    directly via the Azure Speech SDK for real-time transcription.
+    
     Client sends PCM16 mono frames at 24000 Hz as binary messages.
     Server streams partial/final transcripts back as JSON text frames.
     { type: "partial" | "final", text: string }

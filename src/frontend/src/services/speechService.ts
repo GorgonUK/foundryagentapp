@@ -233,7 +233,147 @@ export async function startVoiceCapture(
 }
 
 
-// Live streaming via WebSocket to backend /voice/live
+// Azure Speech-to-Text with fast transcription (real-time partial results)
+export function startAzureSTT(
+  onPartial: (text: string) => void,
+  onFinal: (text: string) => void
+): Promise<() => void> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("Microphone not supported");
+      }
+
+      // Get speech token from backend
+      const resp = await fetch("/speech/token", { credentials: "include" });
+      if (!resp.ok) {
+        throw new Error("Failed to fetch speech token");
+      }
+      const { token, region } = await resp.json();
+
+      // Dynamically import Azure Speech SDK
+      const sdk = await import("microsoft-cognitiveservices-speech-sdk");
+      
+      // Create speech config with token
+      const speechConfig = sdk.SpeechConfig.fromAuthorizationToken(token, region);
+      speechConfig.speechRecognitionLanguage = navigator.language || "en-US";
+
+      // Get microphone input
+      const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+      
+      // Create recognizer
+      const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+
+      let accumulatedText = "";
+      let currentPartial = "";
+      let isStopped = false;
+
+      // Handle partial results (fast transcription) - these update in real-time
+      recognizer.recognizing = (s, e) => {
+        if (isStopped) return;
+        if (e.result && e.result.text) {
+          currentPartial = e.result.text;
+          // Show accumulated text + current partial
+          const fullText = accumulatedText + currentPartial;
+          onPartial(fullText.trim());
+        }
+      };
+
+      // Handle final results - these are committed segments
+      recognizer.recognized = (s, e) => {
+        if (isStopped) return;
+        if (e.result && e.result.reason === sdk.ResultReason.RecognizedSpeech) {
+          if (e.result.text) {
+            // Add final text to accumulated text
+            accumulatedText += e.result.text + " ";
+            currentPartial = "";
+            // Update partial display with accumulated text
+            onPartial(accumulatedText.trim());
+          }
+        }
+      };
+
+      // Handle errors
+      recognizer.canceled = (s, e) => {
+        if (e.reason === sdk.CancellationReason.Error) {
+          micActive = false;
+          notifyMic(false);
+          reject(new Error(`Speech recognition error: ${e.errorDetails}`));
+        }
+      };
+
+      // Handle session end
+      recognizer.sessionStopped = () => {
+        micActive = false;
+        notifyMic(false);
+      };
+
+      // Start recognition
+      micActive = true;
+      notifyMic(true);
+      cancelSpeech();
+      recognizer.startContinuousRecognitionAsync(
+        () => {
+          // Success callback
+          const stop = () => {
+            if (isStopped) return;
+            isStopped = true;
+            try {
+              recognizer.stopContinuousRecognitionAsync(
+                () => {
+                  recognizer.close();
+                  audioConfig.close();
+                  speechConfig.close();
+                  micActive = false;
+                  notifyMic(false);
+                  // Send final accumulated text (including any remaining partial)
+                  const finalText = (accumulatedText + currentPartial).trim();
+                  if (finalText) {
+                    onFinal(finalText);
+                  }
+                },
+                (err) => {
+                  recognizer.close();
+                  audioConfig.close();
+                  speechConfig.close();
+                  micActive = false;
+                  notifyMic(false);
+                  const finalText = (accumulatedText + currentPartial).trim();
+                  if (finalText) {
+                    onFinal(finalText);
+                  }
+                }
+              );
+            } catch (e) {
+              micActive = false;
+              notifyMic(false);
+              const finalText = (accumulatedText + currentPartial).trim();
+              if (finalText) {
+                onFinal(finalText);
+              }
+            }
+          };
+          resolve(stop);
+        },
+        (err) => {
+          // Error callback
+          recognizer.close();
+          audioConfig.close();
+          speechConfig.close();
+          micActive = false;
+          notifyMic(false);
+          reject(new Error(`Failed to start recognition: ${err}`));
+        }
+      );
+    } catch (e) {
+      micActive = false;
+      notifyMic(false);
+      reject(e);
+    }
+  });
+}
+
+// Live streaming via WebSocket to backend /voice/live (DEPRECATED - replaced by startAzureSTT)
 export function startLiveVoice(
   onPartial: (text: string) => void,
   onFinal: (text: string) => void
