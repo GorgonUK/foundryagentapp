@@ -30,14 +30,6 @@ const App: React.FC = () => {
 
         if (response.ok) {
           const data = await response.json();
-          console.log(
-            "Agent details fetched successfully:",
-            JSON.stringify(data)
-          );
-          console.log(
-            "Agent details fetched successfully 2:",
-            JSON.stringify(response)
-          );
           setAgentDetails(data);
         } else {
           console.error("Failed to fetch agent details");

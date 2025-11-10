@@ -1,0 +1,63 @@
+.liveVoiceContainer {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+  gap: 24px;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.avatarSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 400px;
+  min-width: 300px;
+  max-width: 500px;
+  padding: 24px;
+  background: var(--colorNeutralBackground2);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.chatSection {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.statusIndicator {
+  margin-top: 16px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.connected {
+  color: var(--colorPaletteGreenForeground1);
+}
+
+.disconnected {
+  color: var(--colorNeutralForegroundDisabled);
+}
+
+@media (max-width: 1024px) {
+  .liveVoiceContainer {
+    flex-direction: column;
+  }
+
+  .avatarSection {
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
+
+  .chatSection {
+    flex: 1;
+  }
+}
+

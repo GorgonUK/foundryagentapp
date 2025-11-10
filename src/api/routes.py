@@ -135,6 +135,51 @@ async def get_speech_token(_ = auth_dependency):
         logger.error(f"Error fetching speech token: {e}")
         raise HTTPException(status_code=500, detail="Failed to get speech token")
 
+@router.get("/speech/avatar/relay/token")
+async def get_avatar_relay_token(_ = auth_dependency):
+    """Return avatar relay token for WebRTC connection. Never expose the key to the client."""
+    region = os.environ.get("AZURE_SPEECH_REGION", "").strip()
+    key = os.environ.get("AZURE_SPEECH_KEY", "").strip()
+    if not region or not key:
+        raise HTTPException(status_code=400, detail="Speech region/key not configured")
+    
+    # Try the standard endpoint first
+    token_url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/avatar/relay/token/v1"
+    headers = {"Ocp-Apim-Subscription-Key": key}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(token_url, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error(f"Avatar relay token API returned {resp.status}: {text}")
+                    raise HTTPException(status_code=500, detail=f"Failed to get avatar relay token: {resp.status} {text}")
+                token_data = await resp.json()
+                logger.info(f"Avatar relay token response structure: {list(token_data.keys()) if isinstance(token_data, dict) else 'not a dict'}")
+                # Log the structure without sensitive data
+                if isinstance(token_data, dict):
+                    safe_data = {k: (v if k not in ['Password', 'password', 'Credential', 'credential'] else '***') for k, v in token_data.items()}
+                    logger.info(f"Avatar relay token response (sanitized): {safe_data}")
+                    
+                    # Check if the response has null values - this might indicate the region doesn't support avatar
+                    if token_data.get("Urls") is None or token_data.get("Username") is None or token_data.get("Password") is None:
+                        logger.warning(f"Avatar relay token returned null values. This may indicate:")
+                        logger.warning(f"  1. Region '{region}' may not support Avatar feature")
+                        logger.warning(f"  2. API key may not have Avatar permissions")
+                        logger.warning(f"  3. Avatar feature may require a different endpoint or configuration")
+                        logger.warning(f"Full response: {safe_data}")
+                        # Return a more helpful error
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"Avatar feature not available. Region '{region}' may not support Avatar, or the API key may not have Avatar permissions. Please check Azure Speech Service documentation for supported regions."
+                        )
+                        
+                return JSONResponse(token_data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching avatar relay token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get avatar relay token")
+
 async def get_message_and_annotations(agent_client : AgentsClient, message: ThreadMessage) -> Dict:
     annotations = []
     # Get file annotations for the file search.

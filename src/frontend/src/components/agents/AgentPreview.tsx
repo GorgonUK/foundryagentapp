@@ -6,12 +6,13 @@ import {
   Spinner,
   Title3,
 } from "@fluentui/react-components";
-import { ChatRegular, MoreHorizontalRegular } from "@fluentui/react-icons";
+import { ChatRegular, MoreHorizontalRegular, MicRegular } from "@fluentui/react-icons";
 import clsx from "clsx";
 
 import { AgentIcon } from "./AgentIcon";
 import { SettingsPanel } from "../core/SettingsPanel";
 import { AgentPreviewChatBot } from "./AgentPreviewChatBot";
+import { LiveVoiceView } from "./LiveVoiceView";
 import { MenuButton } from "../core/MenuButton/MenuButton";
 import { IChatItem } from "./chatbot/types";
 import { Waves } from "./Waves";
@@ -98,6 +99,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
   const [isResponding, setIsResponding] = useState(false);
   const [isLoadingChatHistory, setIsLoadingChatHistory] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
+  const [isLiveVoiceMode, setIsLiveVoiceMode] = useState<boolean>(false);
 
   const loadChatHistory = async () => {
     try {
@@ -225,15 +227,8 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(postData),
-        credentials: "include", // <--- allow cookies to be included
+        credentials: "include"
       });
-
-      // Log out the response status in case there’s an error
-      console.log(
-        "[ChatClient] Response status:",
-        response.status,
-        response.statusText
-      );
 
       // If server returned e.g. 400 or 500, that’s not an exception, but we can check manually:
       if (!response.ok) {
@@ -250,8 +245,6 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
           "ReadableStream not supported or response.body is null"
         );
       }
-
-      console.log("[ChatClient] Starting to handle streaming response...");
       handleMessages(response.body);
     } catch (error: any) {
       setIsResponding(false);
@@ -271,6 +264,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
     let isStreaming = true;
     let buffer = "";
     let annotations: IAnnotation[] = [];
+    let fullContentForLipSync: string | null = null; // Store full content for Live Voice mode
 
     // Create a reader for the SSE stream
     const reader = stream.getReader();
@@ -280,13 +274,11 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          console.log("[ChatClient] SSE stream ended by server.");
           break;
         }
 
         // Convert the incoming Uint8Array to text
         const textChunk = decoder.decode(value, { stream: true });
-        console.log("[ChatClient] Raw chunk from stream:", textChunk);
 
         buffer += textChunk;
         let boundary = buffer.indexOf("\n");
@@ -295,8 +287,6 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
         while (boundary !== -1) {
           const chunk = buffer.slice(0, boundary).trim();
           buffer = buffer.slice(boundary + 1);
-
-          console.log("[ChatClient] SSE line:", chunk); // log each line we extract
 
           if (chunk.startsWith("data: ")) {
             // Attempt to parse JSON
@@ -310,14 +300,9 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
               continue;
             }
 
-            console.log("[ChatClient] Parsed SSE event:", data);
-
             if (data.error) {
               if (!chatItem) {
                 chatItem = createAssistantMessageDiv();
-                console.log(
-                  "[ChatClient] Created new messageDiv for assistant."
-                );
               }
 
               setIsResponding(false);
@@ -342,9 +327,6 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
               // If we have no messageDiv yet, create one
               if (!chatItem) {
                 chatItem = createAssistantMessageDiv();
-                console.log(
-                  "[ChatClient] Created new messageDiv for assistant."
-                );
               }
 
               if (data.type === "completed_message") {
@@ -352,64 +334,75 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
                 accumulatedContent = data.content;
                 annotations = data.annotations;
                 isStreaming = false;
-                console.log(
-                  "[ChatClient] Received completed message:",
-                  accumulatedContent
-                );
 
                 // If the final content is structured JSON with voice_summary/text_detail,
                 // speak the summary and display only the detail.
+                // For Live Voice mode, store the full content so avatar can extract voice_summary.
+                let shouldStoreFullContent = isLiveVoiceMode;
+                if (shouldStoreFullContent) {
+                  fullContentForLipSync = accumulatedContent; // Store full content for Live Voice mode
+                }
                 try {
                   const parsed = JSON.parse(accumulatedContent);
                   if (parsed && typeof parsed === "object") {
                     const summary = (parsed as any).voice_summary as string | undefined;
                     const detail = (parsed as any).text_detail as string | undefined;
                     if (summary) {
-                      // Only speak if voice is enabled
-                      if (voiceEnabled) {
+                      // Only speak if voice is enabled and NOT in Live Voice mode
+                      // (Live Voice mode will handle speaking via avatar)
+                      if (voiceEnabled && !isLiveVoiceMode) {
                         // Prefer Azure Speech, fallback handled inside
                         await speakAzureText(summary, "en-GB-AdaMultilingualNeural");
                       }
                     }
-                    if (detail) {
+                    if (detail && !shouldStoreFullContent) {
                       accumulatedContent = detail;
                     }
+                    // If Live Voice mode, keep full content with voice_summary in accumulatedContent
                   }
                 } catch {
                   // Non-JSON; try parsing two-stream plaintext
                   const two = parseTwoStream(accumulatedContent);
                   if (two) {
-                    if (two.summary && voiceEnabled) {
+                    if (two.summary && voiceEnabled && !isLiveVoiceMode) {
+                      // Only speak if NOT in Live Voice mode (avatar will handle it)
                       await speakAzureText(two.summary, "en-GB-AdaMultilingualNeural");
                     }
-                    if (two.detail) {
+                    if (two.detail && !shouldStoreFullContent) {
                       accumulatedContent = two.detail;
                     }
+                    // If Live Voice mode, keep full content with voice_summary in accumulatedContent
                   }
                 }
 
                 setIsResponding(false);
               } else {
                 accumulatedContent += data.content;
-                console.log(
-                  "[ChatClient] Received streaming chunk:",
-                  data.content
-                );
               }
 
               // Update the UI with the accumulated content
-              // Hide voice_summary during streaming; only show text after 'text_detail:' marker
+              // Always hide voice_summary; only show text_detail
               let displayWhileStreaming = accumulatedContent;
               const lower = displayWhileStreaming.toLowerCase();
               const textDetailIdx = lower.indexOf("text_detail:");
               const voiceIdx = lower.indexOf("voice_summary:");
-              if (isStreaming && voiceIdx !== -1) {
+              if (voiceIdx !== -1) {
+                // Always hide voice_summary, show only text_detail
                 if (textDetailIdx !== -1 && textDetailIdx + "text_detail:".length <= displayWhileStreaming.length) {
                   displayWhileStreaming = displayWhileStreaming
                     .substring(textDetailIdx + "text_detail:".length)
                     .trimStart();
+                } else if (isStreaming) {
+                  displayWhileStreaming = ""; // suppress until detail appears during streaming
                 } else {
-                  displayWhileStreaming = ""; // suppress until detail appears
+                  // Not streaming but has voice_summary - try to extract detail
+                  const two = parseTwoStream(accumulatedContent);
+                  if (two && two.detail) {
+                    displayWhileStreaming = two.detail;
+                  } else {
+                    // Fallback: remove voice_summary section
+                    displayWhileStreaming = accumulatedContent.replace(/voice_summary\s*:[\s\S]*?text_detail\s*:/i, "").trim();
+                  }
                 }
               }
 
@@ -419,6 +412,28 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
                 isStreaming,
                 annotations
               );
+              
+              // For Live Voice mode, update the message metadata with full content for lip sync
+              // after it's been added (so we can extract voice_summary)
+              if (!isStreaming && isLiveVoiceMode && fullContentForLipSync && chatItem !== null) {
+                const chatItemId = chatItem.id;
+                const fullContent = fullContentForLipSync;
+                setMessageList((prev: IChatItem[]) => {
+                  return prev.map((msg) => {
+                    if (msg.id === chatItemId) {
+                      return {
+                        ...msg,
+                        more: {
+                          ...msg.more,
+                          fullContentForLipSync: fullContent,
+                        },
+                      };
+                    }
+                    return msg;
+                  });
+                });
+                fullContentForLipSync = null; // Reset after storing
+              }
             }
           }
 
@@ -578,6 +593,13 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
         </div>
         <div className={styles.rightSection}>
           <Button
+            appearance={isLiveVoiceMode ? "primary" : "subtle"}
+            icon={<MicRegular aria-hidden={true} />}
+            onClick={() => setIsLiveVoiceMode((v) => !v)}
+          >
+            Live Voice
+          </Button>
+          <Button
             appearance="subtle"
             onClick={() => setVoiceEnabled((v) => !v)}
           >
@@ -602,34 +624,44 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
         </div>
       </div>
 
-      <div className={styles.content}>
-        <div className={styles.chatbot}>
-          {isLoadingChatHistory ? (
-            <Spinner label={"Loading chat history..."} />
-          ) : (
-            <>
-              {isEmpty && (
-                <div className={styles.emptyChatContainer}>
-                  <AgentIcon
-                    alt=""
-                    iconClassName={styles.emptyStateAgentIcon}
-                    iconName={agentDetails.metadata?.logo}
-                  />
-                  <Caption1 className={styles.agentName}>
-                    {agentDetails.name}
-                  </Caption1>
-                  <Title3>How can I help you today?</Title3>
-                </div>
-              )}
-              <AgentPreviewChatBot
-                agentName={agentDetails.name}
-                agentLogo={agentDetails.metadata?.logo}
-                chatContext={chatContext}
-              />
-            </>
-          )}
-        </div>
-
+      <div className={`${styles.content} ${!isLiveVoiceMode ? styles.liveVoiceMode : ''}`}>
+        {isLiveVoiceMode ? (
+          <LiveVoiceView
+            agentDetails={agentDetails}
+            onClose={() => setIsLiveVoiceMode(false)}
+            onMessageListChange={setMessageList}
+            messageList={messageList}
+            isResponding={isResponding}
+            onSend={onSend}
+          />
+        ) : (
+          <div className={styles.chatbot}>
+            {isLoadingChatHistory ? (
+              <Spinner label={"Loading chat history..."} />
+            ) : (
+              <>
+                {isEmpty && (
+                  <div className={styles.emptyChatContainer}>
+                    <AgentIcon
+                      alt=""
+                      iconClassName={styles.emptyStateAgentIcon}
+                      iconName={agentDetails.metadata?.logo}
+                    />
+                    <Caption1 className={styles.agentName}>
+                      {agentDetails.name}
+                    </Caption1>
+                    <Title3>How can I help you today?</Title3>
+                  </div>
+                )}
+                <AgentPreviewChatBot
+                  agentName={agentDetails.name}
+                  agentLogo={agentDetails.metadata?.logo}
+                  chatContext={chatContext}
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Settings Panel */}
