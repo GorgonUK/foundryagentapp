@@ -15,6 +15,7 @@ const App: React.FC = () => {
       logo: "robot",
     },
   });
+  const [audioInputDeviceId, setAudioInputDeviceId] = useState<string | undefined>(undefined);
 
   const fetchAgentDetails = useCallback(async () => {
     try {
@@ -84,6 +85,10 @@ const App: React.FC = () => {
     }
   }, [fetchAgentDetails]);
 
+  const handleAudioInputChanged = useCallback((deviceId?: string) => {
+    setAudioInputDeviceId(deviceId || undefined);
+  }, []);
+
   return (
     <ThemeProvider>
       <div className="app-container">
@@ -91,6 +96,8 @@ const App: React.FC = () => {
           resourceId="sample-resource-id"
           agentDetails={agentDetails}
           onAgentChanged={handleAgentChanged}
+          audioInputDeviceId={audioInputDeviceId}
+          onAudioInputChanged={handleAudioInputChanged}
         />
       </div>
     </ThemeProvider>

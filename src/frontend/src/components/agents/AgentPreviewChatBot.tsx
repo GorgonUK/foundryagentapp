@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./AssistantMessage";
 import { UserMessage } from "./UserMessage";
 import { ChatInput } from "./chatbot/ChatInput";
@@ -21,6 +21,14 @@ export function AgentPreviewChatBot({
     [chatContext.messageList]
   );
 
+  // Auto-scroll to bottom on new messages or state changes
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messageListFromChatContext.length, chatContext.isResponding]);
+
   const onEditMessage = (messageId: string) => {
     const selectedMessage = messageListFromChatContext.find(
       (message) => !message.isAnswer && message.id === messageId
@@ -30,6 +38,19 @@ export function AgentPreviewChatBot({
 
   const isEmpty = messageListFromChatContext.length === 0;
 
+  const lastMsg = messageListFromChatContext[messageListFromChatContext.length - 1];
+  const lastIsAssistant = !!lastMsg?.isAnswer;
+  const showTypingIndicator = chatContext.isResponding && !lastIsAssistant;
+  const typingPlaceholder = useMemo(
+    () => ({
+      id: "typing-indicator",
+      content: "",
+      isAnswer: true,
+      more: { time: new Date().toISOString() },
+    }),
+    []
+  );
+
   return (
     <div
       className={clsx(
@@ -38,7 +59,7 @@ export function AgentPreviewChatBot({
       )}
     >
       {!isEmpty ? (
-        <div className={styles.copilotChatContainer}>
+        <div className={styles.copilotChatContainer} ref={containerRef}>
           {messageListFromChatContext.map((message, index, messageList) =>
             message.isAnswer ? (
               <AssistantMessage
@@ -59,6 +80,11 @@ export function AgentPreviewChatBot({
                 onEditMessage={onEditMessage}
               />
             )
+          )}
+          {showTypingIndicator && (
+            <div className={styles.typingRow}>
+              <span className={styles.typingDots} aria-live="polite" aria-label="Assistant is thinking"></span>
+            </div>
           )}
         </div>
       ) : (

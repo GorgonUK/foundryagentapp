@@ -46,6 +46,8 @@ interface IAgentPreviewProps {
   resourceId: string;
   agentDetails: IAgent;
   onAgentChanged?: (agentId: string) => Promise<void> | void;
+  audioInputDeviceId?: string;
+  onAudioInputChanged?: (deviceId?: string) => Promise<void> | void;
 }
 
 interface IAnnotation {
@@ -95,7 +97,12 @@ const parseTwoStream = (
   return null;
 };
 
-export function AgentPreview({ agentDetails, onAgentChanged }: IAgentPreviewProps): ReactNode {
+export function AgentPreview({
+  agentDetails,
+  onAgentChanged,
+  audioInputDeviceId,
+  onAudioInputChanged,
+}: IAgentPreviewProps): ReactNode {
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [messageList, setMessageList] = useState<IChatItem[]>([]);
   const [isResponding, setIsResponding] = useState(false);
@@ -652,6 +659,7 @@ export function AgentPreview({ agentDetails, onAgentChanged }: IAgentPreviewProp
             messageList={messageList}
             isResponding={isResponding}
             onSend={onSend}
+            audioInputDeviceId={audioInputDeviceId}
           />
         ) : (
           <div className={styles.chatbot}>
@@ -689,6 +697,8 @@ export function AgentPreview({ agentDetails, onAgentChanged }: IAgentPreviewProp
         onOpenChange={handleSettingsPanelOpenChange}
         currentAgentId={agentDetails?.id}
         onAgentChanged={onAgentChanged}
+        audioInputDeviceId={audioInputDeviceId}
+        onAudioInputChange={onAudioInputChanged}
       />
     </div>
   );

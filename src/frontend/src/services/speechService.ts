@@ -88,6 +88,8 @@ let playbackCtx: AudioContext | null = null;
 let playbackTimeOffset = 0;
 let playbackGain: GainNode | null = null;
 
+const TTS_START_DELAY_MS = 1000;
+
 function notifyMic(active: boolean) {
   micSubscribers.forEach(cb => {
     try { cb(active); } catch { /* ignore */ }
@@ -124,6 +126,11 @@ async function waitWhileMicActive(): Promise<void> {
   });
 }
 
+async function applyTtsDelay(): Promise<void> {
+  if (TTS_START_DELAY_MS <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, TTS_START_DELAY_MS));
+}
+
 // Azure Speech Synthesis via token endpoint, defers if mic is active
 export async function speakAzureText(
   text: string,
@@ -133,6 +140,7 @@ export async function speakAzureText(
   try {
     // If user is speaking, defer TTS until they finish
     await waitWhileMicActive();
+    await applyTtsDelay();
     const resp = await fetch("/speech/token", { credentials: "include" });
     if (!resp.ok) throw new Error("Failed to fetch speech token");
     const { token, region } = await resp.json();
@@ -161,6 +169,7 @@ export async function speakAzureText(
   } catch (e) {
     // Fallback to browser TTS if Azure Speech fails
     await waitWhileMicActive();
+    await applyTtsDelay();
     speakText(text);
   }
 }

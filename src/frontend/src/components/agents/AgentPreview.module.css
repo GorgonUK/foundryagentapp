@@ -83,7 +83,8 @@
 
 .content.liveVoiceMode {
   display: grid;
-  grid-template-columns: 1fr minmax(min(500px, 100%), 50%) 1fr;
+  grid-template-columns: 1fr minmax(min(500px, 100%), 100%) 1fr;
+  padding: 24px;
 }
 
 .builtWithBadge {

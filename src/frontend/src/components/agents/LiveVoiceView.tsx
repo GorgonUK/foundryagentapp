@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPreviewChatBot } from "./AgentPreviewChatBot";
 import { LiveVoiceAvatar } from "./LiveVoiceAvatar";
 import { IChatItem } from "./chatbot/types";
@@ -8,8 +8,9 @@ import { formatAgentName } from "../../utils/formatAgentName";
 const SPEECH_SDK_SCRIPT_ID = "azure-speech-sdk";
 const SPEECH_SDK_SRC = "https://aka.ms/csspeech/jsbrowserpackageraw";
 const DEFAULT_AVATAR_CHARACTER = "meg";
-const DEFAULT_AVATAR_STYLE = "formal";
-const DEFAULT_VOICE = "en-US-AvaMultilingualNeural";
+const DEFAULT_AVATAR_STYLE = "business";
+const DEFAULT_VOICE = "en-GB-LibbyNeural";
+const LOG_PREFIX = "[LiveVoice]";
 
 function extractSpeechText(content: string): string {
   if (!content) {
@@ -31,15 +32,17 @@ interface LiveVoiceViewProps {
   messageList: IChatItem[];
   isResponding: boolean;
   onSend: (message: string) => void;
+  audioInputDeviceId?: string;
 }
 
 export function LiveVoiceView({
   agentDetails,
-  onClose,
-  onMessageListChange,
+  onClose: _onClose,
+  onMessageListChange: _onMessageListChange,
   messageList,
   isResponding,
   onSend,
+  audioInputDeviceId,
 }: LiveVoiceViewProps): JSX.Element {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -74,6 +77,7 @@ export function LiveVoiceView({
 
     const win = window as any;
     if (win.SpeechSDK) {
+      console.log(LOG_PREFIX, "Speech SDK already loaded on window");
       sdkRef.current = win.SpeechSDK;
       setSdkReady(true);
       return;
@@ -84,12 +88,14 @@ export function LiveVoiceView({
     if (existingScript) {
       existingScript.addEventListener("load", () => {
         if (!cancelled && win.SpeechSDK) {
+          console.log(LOG_PREFIX, "Speech SDK script load event (existing tag)");
           sdkRef.current = win.SpeechSDK;
           setSdkReady(true);
         }
       });
       existingScript.addEventListener("error", () => {
         if (!cancelled) {
+          console.error(LOG_PREFIX, "Speech SDK existing script failed to load");
           setSdkError("Failed to load Azure Speech SDK");
         }
       });
@@ -103,15 +109,17 @@ export function LiveVoiceView({
     script.onload = () => {
       if (cancelled) return;
       if (win.SpeechSDK) {
+        console.log(LOG_PREFIX, "Speech SDK script loaded successfully");
         sdkRef.current = win.SpeechSDK;
         setSdkReady(true);
       } else {
+        console.error(LOG_PREFIX, "Speech SDK script loaded but SpeechSDK not found on window");
         setSdkError("Azure Speech SDK loaded but not available");
       }
     };
     script.onerror = (err) => {
       if (!cancelled) {
-        console.error("Failed to load Azure Speech SDK", err);
+        console.error(LOG_PREFIX, "Failed to load Azure Speech SDK", err);
         setSdkError("Failed to load Azure Speech SDK");
       }
     };
@@ -130,6 +138,7 @@ export function LiveVoiceView({
 
     const sdk = sdkRef.current;
     if (!sdk) {
+      console.error(LOG_PREFIX, "SDK ready flag set but SpeechSDK ref missing");
       setSdkError("Azure Speech SDK not available");
       return;
     }
@@ -141,15 +150,21 @@ export function LiveVoiceView({
 
     const connectAvatar = async () => {
       try {
+        console.log(LOG_PREFIX, "Requesting speech token…");
         const tokenResp = await fetch("/speech/token", { credentials: "include" });
         if (!tokenResp.ok) {
-          throw new Error("Failed to fetch speech token");
+          const errorText = await tokenResp.text().catch(() => "");
+          console.error(LOG_PREFIX, "Failed to fetch speech token", tokenResp.status, errorText);
+          throw new Error(`Failed to fetch speech token (${tokenResp.status})`);
         }
         const { token, region } = await tokenResp.json();
+        console.log(LOG_PREFIX, "Obtained speech token for region", region);
 
+        console.log(LOG_PREFIX, "Requesting avatar relay token…");
         const relayTokenResp = await fetch("/speech/avatar/relay/token", { credentials: "include" });
         if (!relayTokenResp.ok) {
           const errorText = await relayTokenResp.text();
+          console.error(LOG_PREFIX, "Failed to fetch avatar relay token", relayTokenResp.status, errorText);
           let errorDetail = errorText;
           try {
             const errorJson = JSON.parse(errorText);
@@ -160,6 +175,7 @@ export function LiveVoiceView({
           throw new Error(`Failed to fetch avatar relay token: ${relayTokenResp.status} ${errorDetail}`);
         }
         const relayTokenData = await relayTokenResp.json();
+        console.log(LOG_PREFIX, "Relay token received; top-level keys:", Object.keys(relayTokenData ?? {}));
 
         if (cancelled) return;
 
@@ -184,6 +200,7 @@ export function LiveVoiceView({
 
         avatarSynthesizer.avatarEventReceived = (_s: any, e: any) => {
           const offsetMsg = e.offset === 0 ? "" : `, offset: ${e.offset / 10000}ms`;
+          console.log(LOG_PREFIX, "Avatar event received", e?.eventType, offsetMsg);
         };
 
         const peerConnection = new RTCPeerConnection({
@@ -219,9 +236,9 @@ export function LiveVoiceView({
           dataChannel.onmessage = (e) => {
             try {
               const webRTCEvent = JSON.parse(e.data);
-              console.log("[WebRTC event]", webRTCEvent);
+              console.log(LOG_PREFIX, "[WebRTC event]", webRTCEvent);
             } catch {
-              console.log("[WebRTC event raw]", e.data);
+              console.log(LOG_PREFIX, "[WebRTC event raw]", e.data);
             }
           };
         });
@@ -230,11 +247,11 @@ export function LiveVoiceView({
         peerConnection.oniceconnectionstatechange = () => {
           const state = peerConnection.iceConnectionState;
           if (state === "disconnected" || state === "failed" || state === "closed") {
-            console.warn("WebRTC connection lost:", state);
+            console.warn(LOG_PREFIX, "WebRTC connection lost:", state);
             setVideoStream(null);
             setIsConnected(false);
           } else if (state === "connected" || state === "completed") {
-            console.log("WebRTC connection established");
+            console.log(LOG_PREFIX, "WebRTC connection established");
             setIsConnected(true);
           }
         };
@@ -246,18 +263,18 @@ export function LiveVoiceView({
         try {
           const startResult = await avatarSynthesizer.startAvatarAsync(peerConnection);
           if (startResult.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-            console.log("Avatar started successfully", startResult.resultId);
+            console.log(LOG_PREFIX, "Avatar started successfully", startResult.resultId);
             setIsConnected(true);
           } else {
-            console.warn("Avatar started with unexpected reason", startResult.reason);
+            console.warn(LOG_PREFIX, "Avatar start returned unexpected reason", startResult.reason);
             if (startResult.reason === sdk.ResultReason.Canceled) {
               const cancellationDetails = sdk.CancellationDetails.fromResult(startResult);
-              console.error("Avatar canceled:", cancellationDetails.errorDetails);
+              console.error(LOG_PREFIX, "Avatar canceled:", cancellationDetails.errorDetails);
               setSessionError(`Avatar canceled: ${cancellationDetails.errorDetails}`);
             }
           }
         } catch (error: any) {
-          console.error("Avatar failed to start", error);
+          console.error(LOG_PREFIX, "Avatar failed to start", error);
           setSessionError("Avatar failed to start");
           return;
         }
@@ -271,42 +288,88 @@ export function LiveVoiceView({
         );
         const autoDetectSourceLanguageConfig = sdk.AutoDetectSourceLanguageConfig.fromLanguages(["en-US"]);
 
+        const audioConfig = audioInputDeviceId
+          ? sdk.AudioConfig.fromMicrophoneInput(audioInputDeviceId)
+          : sdk.AudioConfig.fromDefaultMicrophoneInput();
+        console.log(LOG_PREFIX, "Creating speech recognizer with audio config", {
+          usingSpecificDevice: !!audioInputDeviceId,
+        });
         const speechRecognizer = sdk.SpeechRecognizer.FromConfig(
           speechRecognitionConfig,
           autoDetectSourceLanguageConfig,
-          sdk.AudioConfig.fromDefaultMicrophoneInput()
+          audioConfig
         );
         speechRecognizerRef.current = speechRecognizer;
+
+        speechRecognizer.sessionStarted = (_s: any, e: any) => {
+          console.log(LOG_PREFIX, "Speech session started", e?.sessionId);
+        };
+        speechRecognizer.sessionStopped = (_s: any, e: any) => {
+          console.log(LOG_PREFIX, "Speech session stopped", e?.sessionId);
+        };
+        speechRecognizer.speechStartDetected = (_s: any, e: any) => {
+          console.log(LOG_PREFIX, "Speech start detected", e?.offset);
+        };
+        speechRecognizer.speechEndDetected = (_s: any, e: any) => {
+          console.log(LOG_PREFIX, "Speech end detected", e?.offset);
+        };
 
         speechRecognizer.recognized = (_s: any, e: any) => {
           if (e.result.reason === sdk.ResultReason.RecognizedSpeech) {
             const userQuery = e.result.text.trim();
             if (userQuery) {
-              console.log("User speech recognized:", userQuery);
+              console.log(LOG_PREFIX, "User speech recognized:", userQuery);
               onSendRef.current(userQuery);
+            } else {
+              console.log(LOG_PREFIX, "Recognizer returned empty text for recognized speech event");
             }
+          } else if (e.result.reason === sdk.ResultReason.NoMatch) {
+            console.warn(LOG_PREFIX, "Recognizer received speech but could not match to text");
           }
         };
 
         speechRecognizer.canceled = (_s: any, e: any) => {
-          console.warn("Speech recognizer canceled", e);
+          console.warn(LOG_PREFIX, "Speech recognizer canceled", e);
+          if (e?.errorDetails) {
+            setSessionError(`Recognizer canceled: ${e.errorDetails}`);
+          }
+        };
+
+        speechRecognizer.recognizing = (_s: any, e: any) => {
+          if (e.result?.text) {
+            console.debug(LOG_PREFIX, "Speech interim result:", e.result.text);
+          }
         };
 
         if (cancelled) return;
 
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log(LOG_PREFIX, "Requesting microphone stream…", {
+          deviceId: audioInputDeviceId ?? "default",
+        });
+        try {
+          const constraints: MediaStreamConstraints =
+            audioInputDeviceId
+              ? { audio: { deviceId: { exact: audioInputDeviceId } } }
+              : { audio: true };
+          micStream = await navigator.mediaDevices.getUserMedia(constraints);
+          console.log(LOG_PREFIX, "Microphone stream granted", micStream.getAudioTracks().map((t) => t.label));
+        } catch (micError) {
+          console.error(LOG_PREFIX, "User media (microphone) request failed", micError);
+          setSessionError("Microphone access denied or unavailable");
+          throw micError;
+        }
         speechRecognizer.startContinuousRecognitionAsync(
           () => {
-            console.log("Speech recognizer started");
+            console.log(LOG_PREFIX, "Speech recognizer started");
           },
           (err: any) => {
-            console.error("Failed to start speech recognition", err);
+            console.error(LOG_PREFIX, "Failed to start speech recognition", err);
             setSessionError("Failed to start speech recognition");
           }
         );
       } catch (error) {
         if (!cancelled) {
-          console.error("Error connecting avatar:", error);
+          console.error(LOG_PREFIX, "Error connecting avatar pipeline", error);
           setSessionError(error instanceof Error ? error.message : "Failed to start avatar session");
         }
       }
@@ -326,19 +389,22 @@ export function LiveVoiceView({
         } catch {}
         speechRecognizerRef.current.close();
         speechRecognizerRef.current = null;
+        console.log(LOG_PREFIX, "Speech recognizer cleaned up");
       }
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
+        console.log(LOG_PREFIX, "Peer connection closed");
       }
       if (micStream) {
         micStream.getTracks().forEach((track) => track.stop());
+        console.log(LOG_PREFIX, "Microphone tracks stopped");
       }
       spokenTextQueueRef.current = [];
       setVideoStream(null);
       setIsConnected(false);
     };
-  }, [sdkReady, sdkError]);
+  }, [sdkReady, sdkError, audioInputDeviceId]);
 
   const speakNext = useCallback((text: string) => {
     const avatarSynthesizer = avatarSynthesizerRef.current;
@@ -449,7 +515,7 @@ export function LiveVoiceView({
       lastProcessedMessageIdRef.current = lastMessage.id; // Mark as processed
       speak(text);
     } else {
-      console.log("[Lip Sync Debug] useEffect: No text extracted, not speaking");
+      console.log(LOG_PREFIX, "[Lip Sync] No text extracted from message content; not speaking");
     }
   }, [messageList, isResponding, speak]);
 
