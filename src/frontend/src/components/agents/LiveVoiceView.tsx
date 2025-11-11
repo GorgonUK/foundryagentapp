@@ -7,9 +7,6 @@ import { formatAgentName } from "../../utils/formatAgentName";
 
 const SPEECH_SDK_SCRIPT_ID = "azure-speech-sdk";
 const SPEECH_SDK_SRC = "https://aka.ms/csspeech/jsbrowserpackageraw";
-const DEFAULT_AVATAR_CHARACTER = "meg";
-const DEFAULT_AVATAR_STYLE = "business";
-const DEFAULT_VOICE = "en-GB-LibbyNeural";
 const LOG_PREFIX = "[LiveVoice]";
 
 function extractSpeechText(content: string): string {
@@ -33,6 +30,9 @@ interface LiveVoiceViewProps {
   isResponding: boolean;
   onSend: (message: string) => void;
   audioInputDeviceId?: string;
+  avatarCharacter?: string;
+  avatarStyle?: string;
+  voice?: string;
 }
 
 export function LiveVoiceView({
@@ -43,6 +43,9 @@ export function LiveVoiceView({
   isResponding,
   onSend,
   audioInputDeviceId,
+  avatarCharacter = "meg",
+  avatarStyle = "business",
+  voice = "en-GB-LibbyNeural",
 }: LiveVoiceViewProps): JSX.Element {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -58,6 +61,9 @@ export function LiveVoiceView({
   const spokenTextQueueRef = useRef<string[]>([]);
   const onSendRef = useRef(onSend);
   const combinedStreamRef = useRef<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const isCleaningUpRef = useRef<boolean>(false);
+  const isConnectingRef = useRef<boolean>(false);
   const agentDisplayName = useMemo(() => {
     const formatted = formatAgentName(agentDetails?.name);
     return formatted || agentDetails?.name || "";
@@ -130,6 +136,97 @@ export function LiveVoiceView({
     };
   }, []);
 
+  // Cleanup function to properly close all connections
+  const cleanupConnections = useCallback(async (): Promise<void> => {
+    if (isCleaningUpRef.current) {
+      console.log(LOG_PREFIX, "Cleanup already in progress, waiting...");
+      // Wait for existing cleanup to complete
+      while (isCleaningUpRef.current) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return;
+    }
+
+    isCleaningUpRef.current = true;
+    console.log(LOG_PREFIX, "Starting cleanup of avatar connections...");
+
+    try {
+      // Stop speech recognition first
+      if (speechRecognizerRef.current) {
+        try {
+          await new Promise<void>((resolve) => {
+            speechRecognizerRef.current.stopContinuousRecognitionAsync(
+              () => {
+                console.log(LOG_PREFIX, "Speech recognition stopped");
+                resolve();
+              },
+              (err: any) => {
+                console.warn(LOG_PREFIX, "Error stopping speech recognition", err);
+                resolve(); // Continue cleanup even if stop fails
+              }
+            );
+          });
+        } catch (err) {
+          console.warn(LOG_PREFIX, "Exception stopping speech recognition", err);
+        }
+        try {
+          speechRecognizerRef.current.close();
+        } catch (err) {
+          console.warn(LOG_PREFIX, "Exception closing speech recognizer", err);
+        }
+        speechRecognizerRef.current = null;
+      }
+
+      // Close avatar synthesizer
+      if (avatarSynthesizerRef.current) {
+        try {
+          avatarSynthesizerRef.current.close();
+          console.log(LOG_PREFIX, "Avatar synthesizer closed");
+        } catch (err) {
+          console.warn(LOG_PREFIX, "Exception closing avatar synthesizer", err);
+        }
+        avatarSynthesizerRef.current = null;
+      }
+
+      // Close peer connection
+      if (peerConnectionRef.current) {
+        try {
+          peerConnectionRef.current.close();
+          console.log(LOG_PREFIX, "Peer connection closed");
+        } catch (err) {
+          console.warn(LOG_PREFIX, "Exception closing peer connection", err);
+        }
+        peerConnectionRef.current = null;
+      }
+
+      // Stop microphone tracks
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((track) => {
+          track.stop();
+          console.log(LOG_PREFIX, "Microphone track stopped:", track.label);
+        });
+        micStreamRef.current = null;
+      }
+
+      // Clear combined stream
+      if (combinedStreamRef.current) {
+        combinedStreamRef.current.getTracks().forEach((track) => track.stop());
+        combinedStreamRef.current = null;
+      }
+
+      // Clear queue and reset state
+      spokenTextQueueRef.current = [];
+      setVideoStream(null);
+      setIsConnected(false);
+
+      // Give a small delay to ensure all cleanup is complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      console.log(LOG_PREFIX, "Cleanup completed");
+    } finally {
+      isCleaningUpRef.current = false;
+    }
+  }, []);
+
   // Connect to Azure Avatar when SDK is ready
   useEffect(() => {
     if (!sdkReady || sdkError) {
@@ -144,11 +241,28 @@ export function LiveVoiceView({
     }
 
     let cancelled = false;
-    let micStream: MediaStream | null = null;
 
     setSessionError(null);
 
     const connectAvatar = async () => {
+      // Wait for any ongoing cleanup to complete
+      if (isCleaningUpRef.current) {
+        console.log(LOG_PREFIX, "Waiting for cleanup to complete before connecting...");
+        while (isCleaningUpRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+
+      // Prevent concurrent connection attempts
+      if (isConnectingRef.current) {
+        console.log(LOG_PREFIX, "Connection already in progress, skipping...");
+        return;
+      }
+
+      if (cancelled) return;
+
+      isConnectingRef.current = true;
+
       try {
         console.log(LOG_PREFIX, "Requesting speech token…");
         const tokenResp = await fetch("/speech/token", { credentials: "include" });
@@ -194,7 +308,7 @@ export function LiveVoiceView({
         }
 
         const speechConfig = sdk.SpeechConfig.fromAuthorizationToken(token, region);
-        const avatarConfig = new sdk.AvatarConfig(DEFAULT_AVATAR_CHARACTER, DEFAULT_AVATAR_STYLE);
+        const avatarConfig = new sdk.AvatarConfig(avatarCharacter, avatarStyle);
         const avatarSynthesizer = new sdk.AvatarSynthesizer(speechConfig, avatarConfig);
         avatarSynthesizerRef.current = avatarSynthesizer;
 
@@ -351,7 +465,8 @@ export function LiveVoiceView({
             audioInputDeviceId
               ? { audio: { deviceId: { exact: audioInputDeviceId } } }
               : { audio: true };
-          micStream = await navigator.mediaDevices.getUserMedia(constraints);
+          const micStream = await navigator.mediaDevices.getUserMedia(constraints);
+          micStreamRef.current = micStream;
           console.log(LOG_PREFIX, "Microphone stream granted", micStream.getAudioTracks().map((t) => t.label));
         } catch (micError) {
           console.error(LOG_PREFIX, "User media (microphone) request failed", micError);
@@ -372,39 +487,26 @@ export function LiveVoiceView({
           console.error(LOG_PREFIX, "Error connecting avatar pipeline", error);
           setSessionError(error instanceof Error ? error.message : "Failed to start avatar session");
         }
+      } finally {
+        isConnectingRef.current = false;
       }
     };
 
-    connectAvatar();
+    // Cleanup first, then connect
+    void (async () => {
+      await cleanupConnections();
+      if (!cancelled) {
+        await connectAvatar();
+      }
+    })();
 
     return () => {
       cancelled = true;
-      if (avatarSynthesizerRef.current) {
-        avatarSynthesizerRef.current.close();
-        avatarSynthesizerRef.current = null;
-      }
-      if (speechRecognizerRef.current) {
-        try {
-          speechRecognizerRef.current.stopContinuousRecognitionAsync();
-        } catch {}
-        speechRecognizerRef.current.close();
-        speechRecognizerRef.current = null;
-        console.log(LOG_PREFIX, "Speech recognizer cleaned up");
-      }
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-        console.log(LOG_PREFIX, "Peer connection closed");
-      }
-      if (micStream) {
-        micStream.getTracks().forEach((track) => track.stop());
-        console.log(LOG_PREFIX, "Microphone tracks stopped");
-      }
-      spokenTextQueueRef.current = [];
-      setVideoStream(null);
-      setIsConnected(false);
+      isConnectingRef.current = false;
+      // Trigger cleanup when dependencies change
+      void cleanupConnections();
     };
-  }, [sdkReady, sdkError, audioInputDeviceId]);
+  }, [sdkReady, sdkError, audioInputDeviceId, avatarCharacter, avatarStyle, voice, cleanupConnections]);
 
   const speakNext = useCallback((text: string) => {
     const avatarSynthesizer = avatarSynthesizerRef.current;
@@ -430,7 +532,7 @@ export function LiveVoiceView({
     const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis'
                      xmlns:mstts='http://www.w3.org/2001/mstts'
                      xml:lang='en-US'>
-                  <voice name='${DEFAULT_VOICE}'>
+                  <voice name='${voice}'>
                     <mstts:ttsembedding>
                       <mstts:leadingsilence-exact value='0'/>
                       ${text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}
@@ -465,7 +567,7 @@ export function LiveVoiceView({
           setIsSpeaking(false);
         }
       });
-  }, [isConnected]);
+  }, [isConnected, voice]);
 
   const speak = useCallback((text: string) => {
     if (!text) {

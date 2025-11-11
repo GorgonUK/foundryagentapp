@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Button,
   Drawer,
@@ -14,6 +14,13 @@ import { Dismiss24Regular } from "@fluentui/react-icons";
 
 import styles from "./SettingsPanel.module.css";
 import { ThemePicker } from "./theme/ThemePicker";
+import {
+  AvatarOption,
+  LanguageOption,
+  VoiceOption,
+  AVATAR_OPTIONS,
+  LANGUAGE_OPTIONS,
+} from "../../constants/avatarConfig";
 
 export interface ISettingsPanelProps {
   isOpen: boolean;
@@ -22,6 +29,12 @@ export interface ISettingsPanelProps {
   onAgentChanged?: (agentId: string) => Promise<void> | void;
   audioInputDeviceId?: string;
   onAudioInputChange?: (deviceId?: string) => Promise<void> | void;
+  selectedAvatar?: AvatarOption;
+  onAvatarChanged?: (avatar: AvatarOption) => void;
+  selectedLanguage?: LanguageOption;
+  onLanguageChanged?: (language: LanguageOption) => void;
+  selectedVoice?: VoiceOption;
+  onVoiceChanged?: (voice: VoiceOption) => void;
 }
 
 export function SettingsPanel({
@@ -31,6 +44,12 @@ export function SettingsPanel({
   onAgentChanged,
   audioInputDeviceId,
   onAudioInputChange,
+  selectedAvatar,
+  onAvatarChanged,
+  selectedLanguage,
+  onLanguageChanged,
+  selectedVoice,
+  onVoiceChanged,
 }: ISettingsPanelProps): JSX.Element {
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedId, setSelectedId] = useState<string | undefined>(currentAgentId);
@@ -177,6 +196,39 @@ export function SettingsPanel({
     selectedAudioDevice?.label?.trim() ||
     (loadingAudioDevices ? "Loading microphones..." : "System default");
 
+  // Avatar selection
+  const avatarKey = selectedAvatar
+    ? `${selectedAvatar.character}-${selectedAvatar.style}`
+    : "";
+  const handleAvatarChange = (value: string) => {
+    const avatar = AVATAR_OPTIONS.find(
+      (a) => `${a.character}-${a.style}` === value
+    );
+    if (avatar && onAvatarChanged) {
+      onAvatarChanged(avatar);
+    }
+  };
+
+  // Language selection
+  const handleLanguageChange = (value: string) => {
+    const language = LANGUAGE_OPTIONS.find((l) => l.id === value);
+    if (language && onLanguageChanged) {
+      onLanguageChanged(language);
+    }
+  };
+
+  // Voice selection - filtered by selected language
+  const availableVoices = useMemo(() => {
+    return selectedLanguage?.voices || [];
+  }, [selectedLanguage]);
+
+  const handleVoiceChange = (value: string) => {
+    const voice = availableVoices.find((v) => v.id === value);
+    if (voice && onVoiceChanged) {
+      onVoiceChanged(voice);
+    }
+  };
+
   return (
     <Drawer
       className={styles.panel}
@@ -251,6 +303,77 @@ export function SettingsPanel({
           {audioDeviceError && (
             <span className={styles.settingHint}>{audioDeviceError}</span>
           )}
+        </div>
+
+        {/* Avatar Selection */}
+        <div className={styles.settingSection}>
+          <Label htmlFor="avatarDropdown">Avatar</Label>
+          <Dropdown
+            id="avatarDropdown"
+            value={selectedAvatar?.label || "Select an avatar"}
+            selectedOptions={[avatarKey]}
+            onOptionSelect={(_, data) => {
+              const newValue = data.optionValue as string;
+              handleAvatarChange(newValue);
+            }}
+          >
+            {AVATAR_OPTIONS.map((avatar) => {
+              const key = `${avatar.character}-${avatar.style}`;
+              return (
+                <Option key={key} value={key} text={avatar.label}>
+                  <div className={styles.avatarOption}>
+                    <img
+                      src={avatar.imagePath}
+                      alt={avatar.label}
+                      className={styles.avatarThumbnail}
+                    />
+                    <span>{avatar.label}</span>
+                  </div>
+                </Option>
+              );
+            })}
+          </Dropdown>
+        </div>
+
+        {/* Language Selection */}
+        <div className={styles.settingSection}>
+          <Label htmlFor="languageDropdown">Language</Label>
+          <Dropdown
+            id="languageDropdown"
+            value={selectedLanguage?.name || "Select a language"}
+            selectedOptions={[selectedLanguage?.id || ""]}
+            onOptionSelect={(_, data) => {
+              const newValue = data.optionValue as string;
+              handleLanguageChange(newValue);
+            }}
+          >
+            {LANGUAGE_OPTIONS.map((language) => (
+              <Option key={language.id} value={language.id}>
+                {language.name}
+              </Option>
+            ))}
+          </Dropdown>
+        </div>
+
+        {/* Voice Selection */}
+        <div className={styles.settingSection}>
+          <Label htmlFor="voiceDropdown">Voice</Label>
+          <Dropdown
+            id="voiceDropdown"
+            value={selectedVoice?.name || "Select a voice"}
+            selectedOptions={[selectedVoice?.id || ""]}
+            onOptionSelect={(_, data) => {
+              const newValue = data.optionValue as string;
+              handleVoiceChange(newValue);
+            }}
+            disabled={!selectedLanguage || availableVoices.length === 0}
+          >
+            {availableVoices.map((voice) => (
+              <Option key={voice.id} value={voice.id}>
+                {voice.name}
+              </Option>
+            ))}
+          </Dropdown>
         </div>
 
       </DrawerBody>

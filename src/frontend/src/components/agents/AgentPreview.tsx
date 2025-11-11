@@ -20,6 +20,11 @@ import { Waves } from "./Waves";
 import styles from "./AgentPreview.module.css";
 import { speakAzureText } from "../../services/speechService";
 import { formatAgentName } from "../../utils/formatAgentName";
+import {
+  AvatarOption,
+  LanguageOption,
+  VoiceOption,
+} from "../../constants/avatarConfig";
 
 interface IAgent {
   id: string;
@@ -48,6 +53,12 @@ interface IAgentPreviewProps {
   onAgentChanged?: (agentId: string) => Promise<void> | void;
   audioInputDeviceId?: string;
   onAudioInputChanged?: (deviceId?: string) => Promise<void> | void;
+  selectedAvatar?: AvatarOption;
+  onAvatarChanged?: (avatar: AvatarOption) => void;
+  selectedLanguage?: LanguageOption;
+  onLanguageChanged?: (language: LanguageOption) => void;
+  selectedVoice?: VoiceOption;
+  onVoiceChanged?: (voice: VoiceOption) => void;
 }
 
 interface IAnnotation {
@@ -102,6 +113,12 @@ export function AgentPreview({
   onAgentChanged,
   audioInputDeviceId,
   onAudioInputChanged,
+  selectedAvatar,
+  onAvatarChanged,
+  selectedLanguage,
+  onLanguageChanged,
+  selectedVoice,
+  onVoiceChanged,
 }: IAgentPreviewProps): ReactNode {
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [messageList, setMessageList] = useState<IChatItem[]>([]);
@@ -660,6 +677,9 @@ export function AgentPreview({
             isResponding={isResponding}
             onSend={onSend}
             audioInputDeviceId={audioInputDeviceId}
+            avatarCharacter={selectedAvatar?.character}
+            avatarStyle={selectedAvatar?.style}
+            voice={selectedVoice?.id}
           />
         ) : (
           <div className={styles.chatbot}>
@@ -699,6 +719,12 @@ export function AgentPreview({
         onAgentChanged={onAgentChanged}
         audioInputDeviceId={audioInputDeviceId}
         onAudioInputChange={onAudioInputChanged}
+        selectedAvatar={selectedAvatar}
+        onAvatarChanged={onAvatarChanged}
+        selectedLanguage={selectedLanguage}
+        onLanguageChanged={onLanguageChanged}
+        selectedVoice={selectedVoice}
+        onVoiceChanged={onVoiceChanged}
       />
     </div>
   );

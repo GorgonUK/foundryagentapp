@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AgentPreview } from "./agents/AgentPreview";
 import { ThemeProvider } from "./core/theme/ThemeProvider";
+import {
+  AvatarOption,
+  LanguageOption,
+  VoiceOption,
+  DEFAULT_AVATAR,
+  DEFAULT_LANGUAGE,
+  DEFAULT_VOICE,
+} from "../constants/avatarConfig";
 
 const App: React.FC = () => {
   // State to store the agent details
@@ -16,6 +24,9 @@ const App: React.FC = () => {
     },
   });
   const [audioInputDeviceId, setAudioInputDeviceId] = useState<string | undefined>(undefined);
+  const [selectedAvatar, setSelectedAvatar] = useState<AvatarOption>(DEFAULT_AVATAR);
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageOption>(DEFAULT_LANGUAGE);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceOption>(DEFAULT_VOICE);
 
   const fetchAgentDetails = useCallback(async () => {
     try {
@@ -89,6 +100,23 @@ const App: React.FC = () => {
     setAudioInputDeviceId(deviceId || undefined);
   }, []);
 
+  const handleAvatarChanged = useCallback((avatar: AvatarOption) => {
+    setSelectedAvatar(avatar);
+  }, []);
+
+  const handleLanguageChanged = useCallback((language: LanguageOption) => {
+    setSelectedLanguage(language);
+    // Reset voice to first voice in the new language
+    const firstVoice = language.voices[0];
+    if (firstVoice) {
+      setSelectedVoice(firstVoice);
+    }
+  }, []);
+
+  const handleVoiceChanged = useCallback((voice: VoiceOption) => {
+    setSelectedVoice(voice);
+  }, []);
+
   return (
     <ThemeProvider>
       <div className="app-container">
@@ -98,6 +126,12 @@ const App: React.FC = () => {
           onAgentChanged={handleAgentChanged}
           audioInputDeviceId={audioInputDeviceId}
           onAudioInputChanged={handleAudioInputChanged}
+          selectedAvatar={selectedAvatar}
+          onAvatarChanged={handleAvatarChanged}
+          selectedLanguage={selectedLanguage}
+          onLanguageChanged={handleLanguageChanged}
+          selectedVoice={selectedVoice}
+          onVoiceChanged={handleVoiceChanged}
         />
       </div>
     </ThemeProvider>
