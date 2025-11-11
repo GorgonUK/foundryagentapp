@@ -2,6 +2,7 @@
 # Licensed under the MIT license. See LICENSE.md file in the project root for full license information.
 
 import contextlib
+import json
 import os
 
 from azure.ai.projects.aio import AIProjectClient
@@ -97,8 +98,27 @@ async def lifespan(app: fastapi.FastAPI):
         if not agent:
             raise RuntimeError("No agent found. Ensure qunicorn.py created one or set AZURE_EXISTING_AGENT_ID.")
 
+        # Build an agents catalog from env if provided, else seed with active agent
+        agents_catalog_env = os.getenv("AZURE_AGENTS_JSON", "").strip()
+        agents_catalog = []
+        if agents_catalog_env:
+            try:
+                parsed = json.loads(agents_catalog_env)
+                if isinstance(parsed, list):
+                    # Normalize to id/name pairs
+                    for item in parsed:
+                        if isinstance(item, dict) and item.get("id") and item.get("name"):
+                            agents_catalog.append({"id": item["id"], "name": item["name"]})
+            except Exception:
+                logger.warning("AZURE_AGENTS_JSON is not valid JSON; ignoring.")
+        if not agents_catalog:
+            # Fallback to single agent based on env/current
+            fallback_name = os.environ.get("AZURE_AI_AGENT_NAME", "") or getattr(agent, "name", "")
+            agents_catalog = [{"id": getattr(agent, "id", ""), "name": fallback_name}]
+
         app.state.ai_project = ai_project
         app.state.agent = agent
+        app.state.agents_catalog = agents_catalog
         
         yield
 

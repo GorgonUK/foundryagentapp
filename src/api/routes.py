@@ -103,6 +103,9 @@ def get_agent_client(request: Request) -> AgentsClient:
 def get_agent(request: Request) -> Agent:
     return request.app.state.agent
 
+def get_agents_catalog(request: Request):
+    return getattr(request.app.state, "agents_catalog", [])
+
 def get_app_insights_conn_str(request: Request) -> str:
     if hasattr(request.app.state, "application_insights_connection_string"):
         return request.app.state.application_insights_connection_string
@@ -371,6 +374,79 @@ async def get_chat_agent(
     request: Request
 ):
     return JSONResponse(content=get_agent(request).as_dict())  
+
+@router.get("/agents")
+async def list_agents(request: Request):
+    """
+    Return the configured agents catalog: [{ id, name }].
+    Falls back to the current active agent if no catalog is configured.
+    """
+    try:
+        catalog = get_agents_catalog(request)
+        if not catalog:
+            agent = get_agent(request)
+            catalog = [{"id": getattr(agent, "id", ""), "name": getattr(agent, "name", "")}]
+        return JSONResponse(content={"agents": catalog})
+    except Exception as e:
+        logger.error(f"Error listing agents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list agents")
+
+@router.post("/agent/select")
+async def select_agent(
+    request: Request,
+    ai_project: AIProjectClient = Depends(get_ai_project),
+    _ = auth_dependency
+):
+    """
+    Set the active agent by id or name.
+    Body: { "id": "agent_id" } or { "name": "Agent Name" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    agent_id = (body.get("id") or "").strip()
+    agent_name = (body.get("name") or "").strip()
+
+    if not agent_id and not agent_name:
+        raise HTTPException(status_code=400, detail="id or name is required")
+
+    try:
+        agent_obj: Optional[Agent] = None
+        if agent_id:
+            try:
+                agent_obj = await ai_project.agents.get_agent(agent_id)
+            except Exception as e:
+                logger.error(f"Failed to fetch agent by id '{agent_id}': {e}")
+                raise HTTPException(status_code=404, detail="Agent not found by id")
+        else:
+            # find by name
+            try:
+                async for a in ai_project.agents.list_agents():
+                    if getattr(a, "name", "") == agent_name:
+                        agent_obj = a
+                        break
+            except Exception as e:
+                logger.error(f"Failed to list agents for name lookup '{agent_name}': {e}")
+                raise HTTPException(status_code=500, detail="Failed to lookup agent by name")
+            if not agent_obj:
+                raise HTTPException(status_code=404, detail="Agent not found by name")
+
+        # Update active agent and keep catalog as-is
+        request.app.state.agent = agent_obj
+        # Also update catalog's display name for id if we can
+        catalog = get_agents_catalog(request)
+        if agent_obj and catalog and agent_id:
+            for item in catalog:
+                if item.get("id") == agent_id and not item.get("name"):
+                    item["name"] = getattr(agent_obj, "name", item.get("name", ""))
+
+        return JSONResponse(content=agent_obj.as_dict())
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error selecting agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to select agent")
 
 @router.websocket("/voice/live")
 async def voice_live(ws: WebSocket):

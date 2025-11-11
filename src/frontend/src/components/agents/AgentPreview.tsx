@@ -1,4 +1,4 @@
-import { ReactNode, useState, useMemo, useEffect } from "react";
+import { ReactNode, useState, useMemo, useEffect, useRef } from "react";
 import {
   Body1,
   Button,
@@ -45,6 +45,7 @@ interface IAgent {
 interface IAgentPreviewProps {
   resourceId: string;
   agentDetails: IAgent;
+  onAgentChanged?: (agentId: string) => Promise<void> | void;
 }
 
 interface IAnnotation {
@@ -94,13 +95,14 @@ const parseTwoStream = (
   return null;
 };
 
-export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
+export function AgentPreview({ agentDetails, onAgentChanged }: IAgentPreviewProps): ReactNode {
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [messageList, setMessageList] = useState<IChatItem[]>([]);
   const [isResponding, setIsResponding] = useState(false);
   const [isLoadingChatHistory, setIsLoadingChatHistory] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isLiveVoiceMode, setIsLiveVoiceMode] = useState<boolean>(false);
+  const previousAgentIdRef = useRef<string | undefined>(agentDetails?.id);
 
   const agentDisplayName = useMemo(() => {
     const formatted = formatAgentName(agentDetails?.name);
@@ -198,8 +200,19 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
 
   const newThread = () => {
     setMessageList([]);
+    setIsResponding(false);
     deleteAllCookies();
   };
+
+  useEffect(() => {
+    const previousAgentId = previousAgentIdRef.current;
+    const currentAgentId = agentDetails?.id;
+    if (previousAgentId && currentAgentId && previousAgentId !== currentAgentId) {
+      setIsLiveVoiceMode(false);
+      newThread();
+    }
+    previousAgentIdRef.current = currentAgentId;
+  }, [agentDetails?.id]);
 
   const deleteAllCookies = (): void => {
     document.cookie.split(";").forEach((cookieStr: string) => {
@@ -674,6 +687,8 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
       <SettingsPanel
         isOpen={isSettingsPanelOpen}
         onOpenChange={handleSettingsPanelOpenChange}
+        currentAgentId={agentDetails?.id}
+        onAgentChanged={onAgentChanged}
       />
     </div>
   );

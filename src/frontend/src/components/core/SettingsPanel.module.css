@@ -8,6 +8,12 @@
   gap: 24px;
 }
 
+.settingSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .settingsButton {
   margin: 8px;
 }
