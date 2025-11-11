@@ -3,6 +3,7 @@ import { AgentPreviewChatBot } from "./AgentPreviewChatBot";
 import { LiveVoiceAvatar } from "./LiveVoiceAvatar";
 import { IChatItem } from "./chatbot/types";
 import styles from "./LiveVoiceView.module.css";
+import { formatAgentName } from "../../utils/formatAgentName";
 
 const SPEECH_SDK_SCRIPT_ID = "azure-speech-sdk";
 const SPEECH_SDK_SRC = "https://aka.ms/csspeech/jsbrowserpackageraw";
@@ -54,6 +55,10 @@ export function LiveVoiceView({
   const spokenTextQueueRef = useRef<string[]>([]);
   const onSendRef = useRef(onSend);
   const combinedStreamRef = useRef<MediaStream | null>(null);
+  const agentDisplayName = useMemo(() => {
+    const formatted = formatAgentName(agentDetails?.name);
+    return formatted || agentDetails?.name || "";
+  }, [agentDetails?.name]);
   
   // Keep onSendRef up to date
   useEffect(() => {
@@ -468,7 +473,7 @@ export function LiveVoiceView({
       </div>
       <div className={styles.chatSection}>
         <AgentPreviewChatBot
-          agentName={agentDetails.name}
+          agentName={agentDisplayName}
           agentLogo={agentDetails.metadata?.logo}
           chatContext={useMemo(() => ({
             messageList,

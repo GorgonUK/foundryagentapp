@@ -19,6 +19,7 @@ import { Waves } from "./Waves";
 
 import styles from "./AgentPreview.module.css";
 import { speakAzureText } from "../../services/speechService";
+import { formatAgentName } from "../../utils/formatAgentName";
 
 interface IAgent {
   id: string;
@@ -100,6 +101,11 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
   const [isLoadingChatHistory, setIsLoadingChatHistory] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isLiveVoiceMode, setIsLiveVoiceMode] = useState<boolean>(false);
+
+  const agentDisplayName = useMemo(() => {
+    const formatted = formatAgentName(agentDetails?.name);
+    return formatted || agentDetails?.name || "";
+  }, [agentDetails?.name]);
 
   const loadChatHistory = async () => {
     try {
@@ -570,7 +576,7 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
                 iconName={agentDetails.metadata?.logo}
               />
               <Body1 as="h1" className={styles.agentName}>
-                {agentDetails.name}
+                {agentDisplayName}
               </Body1>
             </div>
           ) : (
@@ -648,13 +654,13 @@ export function AgentPreview({ agentDetails }: IAgentPreviewProps): ReactNode {
                       iconName={agentDetails.metadata?.logo}
                     />
                     <Caption1 className={styles.agentName}>
-                      {agentDetails.name}
+                      {agentDisplayName}
                     </Caption1>
                     <Title3>How can I help you today?</Title3>
                   </div>
                 )}
                 <AgentPreviewChatBot
-                  agentName={agentDetails.name}
+                  agentName={agentDisplayName}
                   agentLogo={agentDetails.metadata?.logo}
                   chatContext={chatContext}
                 />
